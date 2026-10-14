@@ -28,8 +28,8 @@ Run formatting, linting, tests, and the production Worker build:
 
 ```shell
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
 pnpm build
 ```
 

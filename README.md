@@ -46,7 +46,7 @@ The ledger is intentionally small in scope so the project can focus on the compl
 - Deployment, rollback, and recovery runbooks
 - Documented cost limits and migration options
 
-## Product capabilities
+## Planned product capabilities
 
 - Record sessions involving any subset of roster players
 - Add one-time guests or permanent roster players
@@ -96,14 +96,14 @@ Run the same validation stages used by CI:
 
 ```shell
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
 pnpm build
 ```
 
 The current Worker exposes `GET /health` as a minimal platform smoke check. D1 bindings, migrations, Telegram credentials, and application features will be added in later changes.
 
-## Operational controls
+## Planned operational controls
 
 - SGD amounts displayed in dollars and cents, and stored internally as integer cents for accuracy
 - Transactional session writes
