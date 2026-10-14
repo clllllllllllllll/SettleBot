@@ -11,4 +11,3 @@ crate-type = ["cdylib", "rlib"]
 serde = { version = "1", features = ["derive"] }
 worker = { version = "0.8.7", features = ["d1"] }
 worker-macros = "0.8.7"
-

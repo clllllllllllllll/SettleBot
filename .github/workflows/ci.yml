@@ -50,4 +50,3 @@ jobs:
 
       - name: Build Worker
         run: pnpm build
-
