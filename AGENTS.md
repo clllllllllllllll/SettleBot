@@ -2,15 +2,44 @@
 
 ## Project Overview
 
-SettleBot is a planned serverless Telegram ledger for zero-sum group game settlements. The target stack is Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub-based CI/CD; implementation has not started.
+SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions; product features have not been implemented.
 
 ## Repository Structure
 
-- `README.md` — product scope, target architecture, operational controls, and privacy constraints.
-- `AGENTS.md` — repository-specific instructions for coding agents.
-- `agent_docs/` — not present. Add focused documentation here only when details outgrow this file.
+- `src/lib.rs` — Worker entry point and top-level request routing.
+- `src/health.rs` — health-check response boundary.
+- `Cargo.toml` and `Cargo.lock` — Rust crate configuration and locked dependencies.
+- `wrangler.toml` — local and deployment configuration for Cloudflare Workers.
+- `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` — pinned Wrangler tooling and dependency-build policy.
+- `.github/workflows/ci.yml` — formatting, linting, test, and Worker build checks.
+- `README.md` — product scope, architecture, development, operations, and privacy constraints.
 
-No source, test, migration, infrastructure, container, or workflow directories exist yet.
+No D1 migrations or `agent_docs/` directory exist yet. Add them only when their corresponding implementation is introduced.
+
+## Build, Test & Development Commands
+
+Install locked Wrangler dependencies:
+
+```shell
+pnpm install --frozen-lockfile
+```
+
+Run formatting, linting, tests, and the production Worker build:
+
+```shell
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+pnpm build
+```
+
+Start a local Worker development server:
+
+```shell
+pnpm dev
+```
+
+Rust 1.99.0, Node.js 24, pnpm 11.25.0, and the `wasm32-unknown-unknown` target are pinned by repository configuration. Windows development also requires Microsoft C++ Build Tools and the Windows SDK for host-side Rust build scripts. Do not run `pnpm deploy` without explicit authorization.
 
 ## Role & Objective
 
@@ -53,10 +82,11 @@ When writing code, follow these steps in order:
 - **Self-documenting names:** Use descriptive variable, function, type, and module names; avoid unclear abbreviations.
 - **Zero magic values:** Centralize configuration, constants, and environment bindings in typed structures or named constants.
 - **No speculative features:** Do not build hypothetical capabilities. Keep current code easy to replace or remove instead of over-engineering it.
+- Use Rust edition 2021 and the toolchain defined in `rust-toolchain.toml`.
+- Run Rustfmt and treat all Clippy warnings as errors before finalizing Rust changes.
 - For Markdown, use ATX headings, sentence-case section titles, hyphen bullets, and relative repository paths.
 - Keep documentation concise and distinguish planned capabilities from implemented behaviour.
 - Prefer links to stable repository files over duplicating implementation details in documentation.
-- TODO: Document Rust edition, minimum supported Rust version, formatting, linting, error-handling, dependency, and test conventions after the relevant tools are configured.
 
 ## Domain Invariants
 

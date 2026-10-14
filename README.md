@@ -2,7 +2,7 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Planning
+> **Status:** Foundation scaffolded; product features not yet implemented
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
@@ -14,7 +14,7 @@ SettleBot records zero-sum win/loss sessions for a private Telegram group. It tr
 
 The ledger is intentionally small in scope so the project can focus on the complete cloud application lifecycle: architecture, provisioning, testing, deployment, monitoring, security, backup, and recovery.
 
-## Cloud and DevOps focus
+## Cloud and DevOps goals
 
 ### Serverless architecture
 
@@ -59,7 +59,7 @@ The ledger is intentionally small in scope so the project can focus on the compl
 
 One-time guests are excluded from leaderboards but remain visible in the relevant session details.
 
-## Architecture
+## Target architecture
 
 ```mermaid
 flowchart LR
@@ -70,7 +70,38 @@ flowchart LR
     CRON[Scheduled Backup] --> CW
 ```
 
-Changes pass through automated checks before deployment. Telegram sends updates to a secured Cloudflare Worker, which validates permissions, applies the ledger rules, and stores transactional records in D1.
+The intended delivery flow runs automated checks before deployment. Telegram will send updates to a secured Cloudflare Worker, which will validate permissions, apply the ledger rules, and store transactional records in D1.
+
+## Development
+
+### Prerequisites
+
+- Rust 1.99.0 with the `wasm32-unknown-unknown` target, Rustfmt, and Clippy
+- Node.js 24 and pnpm 11.25.0
+- On Windows, Microsoft C++ Build Tools with the Windows SDK
+
+Install the pinned JavaScript tooling:
+
+```shell
+pnpm install --frozen-lockfile
+```
+
+Run the local Worker:
+
+```shell
+pnpm dev
+```
+
+Run the same validation stages used by CI:
+
+```shell
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+pnpm build
+```
+
+The current Worker exposes `GET /health` as a minimal platform smoke check. D1 bindings, migrations, Telegram credentials, and application features will be added in later changes.
 
 ## Operational controls
 

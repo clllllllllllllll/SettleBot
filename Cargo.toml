@@ -1,0 +1,14 @@
+[package]
+name = "settlebot"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+worker = { version = "0.8.7", features = ["d1"] }
+worker-macros = "0.8.7"
+
