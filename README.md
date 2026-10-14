@@ -4,7 +4,7 @@ A production-minded serverless application built to demonstrate cloud architectu
 
 > **Status:** Planning
 >
-> **Stack:** TypeScript, Cloudflare Workers, Cloudflare D1
+> **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
@@ -19,14 +19,15 @@ The ledger is intentionally small in scope so the project can focus on the compl
 ### Serverless architecture
 
 - Event-driven processing through Telegram webhooks
-- Cloudflare Workers for compute and Cloudflare D1 for persistence
+- Rust compiled to WebAssembly for Cloudflare Workers, using the `workers-rs` ecosystem
+- Cloudflare D1 for persistence
 - Services that scale to zero instead of an always-running server
 - Architecture sized for a low-traffic workload and the free tier
 
 ### Continuous delivery
 
 - GitHub-based source control and change review
-- Automated formatting, linting, type checking, and testing
+- Automated Rust formatting, Clippy linting, compilation, and testing
 - Deployment gates that prevent failed builds from reaching production
 - Versioned database migrations and controlled releases
 
@@ -63,7 +64,7 @@ One-time guests are excluded from leaderboards but remain visible in the relevan
 ```mermaid
 flowchart LR
     DEV[Developer] --> GH[GitHub]
-    GH -->|CI checks and deploy| CW[Cloudflare Worker]
+    GH -->|CI checks and deploy| CW[Rust Cloudflare Worker]
     TG[Telegram Group] -->|HTTPS webhook| CW
     CW --> D1[(Cloudflare D1)]
     CRON[Scheduled Backup] --> CW
