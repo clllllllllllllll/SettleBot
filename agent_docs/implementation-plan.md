@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phase 0 is implemented and locally verified, but completion still awaits successful remote CI evidence for the implementation commit. The [Worker](../src/lib.rs) routes `GET /health` to a JSON response and returns 404 otherwise; native [request tests](../src/tests.rs) exercise the same routing and response code. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phases 1–7 are planned and unimplemented.
+Phase 0 is complete. The [Worker](../src/lib.rs) routes `GET /health` to a JSON response and returns 404 otherwise; native [request tests](../src/tests.rs) exercise the same routing and response code. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phase 1 is next; Phases 1–7 remain unimplemented.
 
 ## Phase 0 — Foundation
 
@@ -21,7 +21,7 @@ Local checks passed on 2026-10-20 with the pinned toolchains:
 - `cargo test --locked --all-targets` — 3 passed, 0 failed.
 - `pnpm build` — release Worker build and Wrangler deployment dry run succeeded, with no configured bindings. No deployment was performed.
 
-Remote CI evidence remains pending. Record the successful GitHub Actions run URL and commit SHA containing the request tests before marking Phase 0 complete.
+Remote CI passed for implementation commit [`71ec5910c1eadffdfdddad07e53037bdd3c6495f`](https://github.com/clllllllllllllll/SettleBot/commit/71ec5910c1eadffdfdddad07e53037bdd3c6495f) in [GitHub Actions run `39358093295`](https://github.com/clllllllllllllll/SettleBot/actions/runs/39358093295). The run completed formatting, Clippy, tests, and the production Worker build successfully.
 
 ## Phase 1 — Domain core
 
