@@ -2,13 +2,14 @@
 
 ## Project overview
 
-SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions; product features have not been implemented.
+SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. The pure domain core is implemented and locally verified; persistence and Telegram product workflows remain unimplemented.
 
 ## Repository structure
 
 - `src/lib.rs` — Worker entry point and top-level request routing.
 - `src/health.rs` — health-check response boundary.
 - `src/tests.rs` — native request-level routing and response tests.
+- `src/domain/` — platform-independent ledger types, confirmation rules, and pure tests.
 - `Cargo.toml` and `Cargo.lock` — Rust crate configuration and locked dependencies.
 - `wrangler.toml` — local and deployment configuration for Cloudflare Workers.
 - `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` — pinned Wrangler tooling and dependency-build policy.
@@ -23,7 +24,7 @@ No D1 migrations exist yet; add them with persistence implementation.
 Read [the implementation plan](agent_docs/implementation-plan.md) before implementation. Follow its phases in order, inspect the repository, verify recorded status against code and tests, and continue from the earliest incomplete gate. Do not skip, reorder, or expand a phase without explicit user approval. Mark a phase complete only after implementation, tests, and relevant documentation are verified.
 
 - **Phase 0 — Foundation (complete):** Request-level behavior tests and all local and remote validation checks pass for implementation commit `71ec591`.
-- **Phase 1 — Domain core (next):** Typed money, players, guests, games, participants, session states and dates; pure invariant tests.
+- **Phase 1 — Domain core (locally verified; remote CI pending):** Typed money, players, guests, games, participants, session states and dates; 33 pure invariant tests. Record successful CI for the implementation commit before proceeding to Phase 2.
 - **Phase 2 — Persistence:** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and integration tests.
 - **Phase 3 — Authorized Telegram workflow:** Webhook secret, designated group, and admin checks before writes; guided sessions and admin roster/game creation.
 - **Phase 4 — Resilience:** Input and rate limits, safe logs/errors, timeouts, retries, and abuse controls.

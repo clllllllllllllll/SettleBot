@@ -2,13 +2,13 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Foundation complete; Phase 1 domain implementation is next
+> **Status:** Domain core implemented and locally verified; Phase 1 remote CI pending
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phase 0 is complete: foundation request tests and all local and remote validation checks pass. The current workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phase 0 is complete. Phase 1 domain types and rules pass all local checks; remote validation of the implementation commit is pending. The current workflow validates pull requests and `main`; it does not deploy.
 
 ## Overview
 
@@ -64,6 +64,16 @@ The ledger is intentionally small in scope so the project can focus on the compl
 
 One-time guests are excluded from leaderboards but remain visible in the relevant session details.
 
+## Implemented domain core
+
+The pure [domain module](src/domain/mod.rs) defines signed integer cents, roster players and status, games, session-scoped guests, participant selections, and draft/confirmed sessions. Confirmation requires one game, at least two distinct participants, exactly one amount for every selected identity, and a checked zero-cent total. Guest amounts count in that total; guests remain a separate type from roster players. Confirmed records expose no mutation API.
+
+`occurred_on` is an explicitly selected Asia/Singapore calendar date in `YYYY-MM-DD` form, with valid years 0001–9999. `created_at` is a separately injected UTC instant. The domain reads no clock and never derives the played date from the creation instant.
+
+Identifiers are case-sensitive, nonempty ASCII letters, digits, hyphens, or underscores. Display names are trimmed, must be nonempty, and reject embedded control characters; duplicate display names are allowed because identity controls uniqueness. A guest identity includes its owning session.
+
+The [pure tests](src/domain/tests/mod.rs) cover validation, selection and amount completeness, roster/guest separation, numeric boundaries and overflow, SGD formatting, and creation around Singapore midnight. Persistence, normal roster pickers, leaderboards, authorization, and Telegram workflows remain planned.
+
 ## Target architecture
 
 ```mermaid
@@ -116,7 +126,7 @@ pnpm build
 
 The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) exercise the same routing and response code as the Worker, verifying HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. `pnpm build` compiles the release Worker and performs a deployment dry run.
 
-D1 bindings, migrations, Telegram credentials, and application features will be added in later changes.
+D1 bindings, migrations, Telegram credentials, and user-facing application workflows will be added in later phases.
 
 ## Planned operational controls
 

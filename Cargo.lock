@@ -449,6 +449,7 @@ dependencies = [
 name = "settlebot"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "http",
  "serde",
  "serde_json",

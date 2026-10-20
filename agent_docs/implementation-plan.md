@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phase 0 is complete. The [Worker](../src/lib.rs) routes `GET /health` to a JSON response and returns 404 otherwise; native [request tests](../src/tests.rs) exercise the same routing and response code. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phase 1 is next; Phases 1–7 remain unimplemented.
+Phase 0 is complete. The [Worker](../src/lib.rs) routes `GET /health` to a JSON response and returns 404 otherwise; native [request tests](../src/tests.rs) exercise the same routing and response code. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phase 1 is implemented and locally verified; remote validation of its implementation commit remains pending. Phases 2–7 remain unimplemented and have not started.
 
 ## Phase 0 — Foundation
 
@@ -29,6 +29,21 @@ Remote CI passed for implementation commit [`71ec5910c1eadffdfdddad07e53037bdd3c
 - Define `occurred_on` as the calendar date the game was played in Asia/Singapore, selected or confirmed by the administrator; it may differ from entry day. Define `created_at` as the UTC instant the confirmed record is created, supplied through an injected clock. Do not infer the played date from creation time.
 - A confirmed session has one game, at least two distinct participants, exactly one amount per selected participant, and a checked total of zero cents. Unselected players cannot receive entries. Guests count toward the total but never become roster members implicitly.
 - Gate: pure unit tests cover invalid/empty identifiers and required values, invalid dates, duplicate participants, missing/extra amounts, fewer than two participants, nonzero totals, numeric boundaries and overflow, SGD formatting, and roster/guest separation. Cover creation instants around Singapore midnight without changing the explicitly selected played date.
+
+### Verification evidence
+
+The [domain module](../src/domain/mod.rs) implements validated identities and values, separate draft and immutable confirmed types, session-scoped guests, and checked confirmation. [Pure tests](../src/domain/tests/mod.rs) cover the Phase 1 gate. Creation instants are supplied by the caller without a clock read; the explicitly selected played date is preserved across Singapore midnight.
+
+Local checks passed on 2026-10-20 with the pinned toolchains and the installed Windows C++ build environment:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets -- -D warnings`
+- `cargo test --locked --all-targets` — 36 passed, 0 failed: 33 domain tests and 3 request tests.
+- `pnpm build` — release WebAssembly Worker build and Wrangler deployment dry run succeeded, with no configured bindings. Cached build tools ran in offline mode. No deployment was performed.
+
+Chrono was already present in the lockfile; its explicit domain dependency disables default features and adds no packages. There is no persistence or Telegram integration in the domain.
+
+Remote CI is pending: no pushed Phase 1 implementation commit or successful validation run is recorded. Phase 1 is not marked complete. Record that implementation commit SHA and a successful GitHub Actions run before beginning Phase 2.
 
 ## Phase 2 — Persistence
 

@@ -1,3 +1,4 @@
+pub mod domain;
 mod health;
 
 #[cfg(test)]
