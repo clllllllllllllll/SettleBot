@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phases 0 and 1 are complete. The [Worker](../src/lib.rs) has verified request-level health behavior, and the platform-independent [domain module](../src/domain/mod.rs) has verified ledger types and invariants. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phase 2 is next; Phases 2–7 remain unimplemented and have not started.
+Phases 0 and 1 are complete. The [Worker](../src/lib.rs) has verified request-level health behavior, and the platform-independent [domain module](../src/domain/mod.rs) has verified ledger types and invariants. Phase 2 persistence is implemented and locally verified; successful remote CI evidence remains pending, so Phase 2 is not complete. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks for pull requests and pushes to `main`, with no deployment. Phases 3–7 remain unimplemented and have not started.
 
 ## Phase 0 — Foundation
 
@@ -51,6 +51,24 @@ Remote CI passed for implementation commit [`1b3141a65d971cb502964e89c58fb8ea8cb
 - Persist draft ownership, selection, date, amounts, and revision/state so a later Worker request can resume the flow. Enforce uniqueness by stable identity rather than display name; document any display-name policy explicitly.
 - Commit confirmation, all participant entries, draft consumption, and the successful idempotency result atomically. Distinguish replay of one update from a second confirmation update targeting the same draft. A failed transaction must not leave a success marker or partial ledger changes.
 - Gate: local D1 integration tests apply migrations from an empty database and verify draft resumption, unique participants, valid guest accounting, duplicate-update replay, double confirmation, concurrent confirmations, injected write failure and rollback, and retry after failure or lost response. Each successful draft produces exactly one session; unrelated players remain unchanged.
+
+### Local verification evidence — remote CI pending
+
+The [persistence module](../src/persistence/mod.rs), [migrations](../migrations/), and [local D1 integration tests](../tests/d1.test.mjs) implement this phase. The [persistence notes](persistence.md) document the atomic write strategy, stable identity policy, integer precision, and the verified need for a test-only Wasm/RPC bridge.
+
+Local checks passed on 2026-10-20 with Rust 1.99.0/MSVC, Node.js 24.19.0, pnpm 11.25.0, and Wrangler 4.150.0:
+
+- `pnpm install --frozen-lockfile`
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets -- -D warnings`
+- `cargo test --locked --all-targets` — 44 passed, including all 36 existing tests and 8 persistence unit tests.
+- `pnpm test:d1` — 13 passed against real local D1/workerd, starting with an empty ephemeral database and applying both migrations. Covers seed idempotency, draft resumption/revisions and ownership, stable IDs, scoped guests, same/different-key concurrency, double confirmation, atomic rollback at entry and final-result writes, retry/lost-response replay, full signed cent boundaries, corrupt persisted values, and unrelated players.
+- `pnpm db:migrate:local` — both migrations applied successfully to the local development database only.
+- `pnpm build` — release WebAssembly build and deployment dry run succeeded with no production bindings. No deployment was performed.
+
+Normal builds exclude the feature-gated test RPC bridge. The pinned local workerd rejects `2026-10-14` and reports `2026-10-13` as its newest date, so only the isolated test configuration uses `2026-10-13`. Production configuration is unchanged. Cached build tools ran in offline mode. No remote resources, migrations, secrets, webhooks, or deployments were used.
+
+Remaining gate: record a successful GitHub Actions run URL and the corresponding implementation commit SHA after authorized commit/push and remote validation. Phase 3 has not started.
 
 ## Phase 3 — Authorized Telegram workflow
 

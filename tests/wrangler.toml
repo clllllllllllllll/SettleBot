@@ -1,0 +1,10 @@
+name = "settlebot-d1-tests"
+main = "worker.mjs"
+# Wrangler 4.150.0 bundles workerd with 2026-10-13 as its newest supported date.
+compatibility_date = "2026-10-13"
+
+[[d1_databases]]
+binding = "LEDGER_DB"
+database_name = "settlebot-d1-tests"
+database_id = "local-tests-only"
+migrations_dir = "../migrations"

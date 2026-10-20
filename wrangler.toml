@@ -4,3 +4,9 @@ compatibility_date = "2026-10-14"
 
 [build]
 command = "cargo install -q \"worker-build@0.8.7\" --locked && worker-build --release --locked"
+
+[[env.local.d1_databases]]
+binding = "LEDGER_DB"
+database_name = "settlebot-local"
+database_id = "local-development-only"
+migrations_dir = "migrations"

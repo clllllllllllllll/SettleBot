@@ -2,7 +2,7 @@
 
 ## Project overview
 
-SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. The pure domain core is implemented and verified; persistence and Telegram product workflows remain unimplemented.
+SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. The pure domain core is complete. Phase 2 persistence is implemented and locally verified, with remote CI pending; Telegram product workflows remain unimplemented.
 
 ## Repository structure
 
@@ -10,6 +10,9 @@ SettleBot is a serverless Telegram ledger for zero-sum group game settlements. I
 - `src/health.rs` — health-check response boundary.
 - `src/tests.rs` — native request-level routing and response tests.
 - `src/domain/` — platform-independent ledger types, confirmation rules, and pure tests.
+- `src/persistence/` — injected repository contracts, use cases, and the D1 adapter.
+- `migrations/` — versioned schema and Mahjong/Poker seed migrations.
+- `tests/` and `src/persistence_test.rs` — local D1/workerd integration harness and feature-gated Rust RPC bridge.
 - `Cargo.toml` and `Cargo.lock` — Rust crate configuration and locked dependencies.
 - `wrangler.toml` — local and deployment configuration for Cloudflare Workers.
 - `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` — pinned Wrangler tooling and dependency-build policy.
@@ -17,7 +20,7 @@ SettleBot is a serverless Telegram ledger for zero-sum group game settlements. I
 - `agent_docs/implementation-plan.md` — authoritative phase status and testable completion gates.
 - `README.md` — product scope, architecture, development, operations, and privacy constraints.
 
-No D1 migrations exist yet; add them with persistence implementation.
+See [persistence notes](agent_docs/persistence.md) for transaction rules and the test-only JavaScript boundary. Normal Worker builds exclude the test RPC export and expose no persistence write endpoints.
 
 ## Authoritative implementation phases
 
@@ -25,7 +28,7 @@ Read [the implementation plan](agent_docs/implementation-plan.md) before impleme
 
 - **Phase 0 — Foundation (complete):** Request-level behavior tests and all local and remote validation checks pass for implementation commit `71ec591`.
 - **Phase 1 — Domain core (complete):** Typed money, players, guests, games, participants, session states and dates; 33 pure invariant tests verified for implementation commit `1b3141a`.
-- **Phase 2 — Persistence (next):** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and integration tests.
+- **Phase 2 — Persistence (local gates verified; remote CI pending):** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and real local D1 integration tests. Do not mark complete before successful remote validation evidence.
 - **Phase 3 — Authorized Telegram workflow:** Webhook secret, designated group, and admin checks before writes; guided sessions and admin roster/game creation.
 - **Phase 4 — Resilience:** Input and rate limits, safe logs/errors, timeouts, retries, and abuse controls.
 - **Phase 5 — Reporting:** Add roster-only overall leaderboards, per-game breakdowns, player and session drill-downs, exact dates, guest visibility in relevant session details, and pagination.
@@ -46,6 +49,7 @@ Run formatting, linting, tests, and the production Worker build:
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
+pnpm test:d1
 pnpm build
 ```
 
@@ -53,6 +57,12 @@ Start a local Worker development server:
 
 ```shell
 pnpm dev
+```
+
+Apply versioned migrations only to the local development database:
+
+```shell
+pnpm db:migrate:local
 ```
 
 Rust 1.99.0, Node.js 24, pnpm 11.25.0, and the `wasm32-unknown-unknown` target are pinned by repository configuration. Windows development also requires Microsoft C++ Build Tools and the Windows SDK for host-side Rust build scripts. Do not run `pnpm deploy` without explicit authorization.

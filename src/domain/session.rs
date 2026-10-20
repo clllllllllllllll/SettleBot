@@ -42,6 +42,22 @@ impl DraftSession {
         SessionState::Draft
     }
 
+    pub fn id(&self) -> &SessionId {
+        &self.id
+    }
+
+    pub fn game_id(&self) -> &GameId {
+        &self.game_id
+    }
+
+    pub fn occurred_on(&self) -> OccurredOn {
+        self.occurred_on
+    }
+
+    pub fn participants(&self) -> &[Participant] {
+        &self.participants
+    }
+
     pub fn confirm(
         self,
         entries: Vec<AmountEntry>,

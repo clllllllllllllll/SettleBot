@@ -2,13 +2,13 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Domain core complete; Phase 2 persistence is next
+> **Status:** Domain core complete; Phase 2 persistence locally verified, remote CI pending
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0 and 1 are complete; the domain types and ledger rules pass local and remote validation. The current workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0 and 1 are complete. Phase 2 persistence passes local validation and awaits a successful remote CI run before completion. The current workflow validates pull requests and `main`; it does not deploy.
 
 ## Overview
 
@@ -72,7 +72,15 @@ The pure [domain module](src/domain/mod.rs) defines signed integer cents, roster
 
 Identifiers are case-sensitive, nonempty ASCII letters, digits, hyphens, or underscores. Display names are trimmed, must be nonempty, and reject embedded control characters; duplicate display names are allowed because identity controls uniqueness. A guest identity includes its owning session.
 
-The [pure tests](src/domain/tests/mod.rs) cover validation, selection and amount completeness, roster/guest separation, numeric boundaries and overflow, SGD formatting, and creation around Singapore midnight. Persistence, normal roster pickers, leaderboards, authorization, and Telegram workflows remain planned.
+The [pure tests](src/domain/tests/mod.rs) cover validation, selection and amount completeness, roster/guest separation, numeric boundaries and overflow, SGD formatting, and creation around Singapore midnight. Normal roster pickers, leaderboards, authorization, and Telegram workflows remain planned.
+
+## Implemented persistence
+
+The [persistence module](src/persistence/mod.rs) provides injected repository contracts and use cases for roster players, games, persistent drafts, confirmed sessions with entries, and successful processed updates. Its D1 adapter reconstructs validated domain values on reads. [Versioned migrations](migrations/) create the schema and seed only Mahjong and Poker. Display names may repeat; case-sensitive stable IDs control uniqueness.
+
+Drafts retain their numeric owner, selected game and date, ordered roster/guest participants, partial integer-cent amounts, revision, and open/consumed state. Confirmation validates the complete zero-sum session and commits its entries, draft consumption, and idempotent result in one D1 batch. Replaying the same update returns its original result; a different update against a consumed draft is rejected. The [persistence notes](agent_docs/persistence.md) describe the transaction and local test boundary.
+
+This is a persistence foundation without public write routes. The Worker still exposes only its health check; Telegram authorization and workflows start in Phase 3.
 
 ## Target architecture
 
@@ -115,18 +123,29 @@ Run the local Worker:
 pnpm dev
 ```
 
+Apply migrations to the local development database before persistence development:
+
+```shell
+pnpm db:migrate:local
+```
+
+The `local` Wrangler environment contains only a local placeholder database identity. No staging or production resources are configured. Remote migrations require a separately configured environment and explicit authorization.
+
 Run the same validation stages used by CI:
 
 ```shell
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
+pnpm test:d1
 pnpm build
 ```
 
 The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) exercise the same routing and response code as the Worker, verifying HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. `pnpm build` compiles the release Worker and performs a deployment dry run.
 
-D1 bindings, migrations, Telegram credentials, and user-facing application workflows will be added in later phases.
+`pnpm test:d1` builds a separate feature-gated Rust test module and runs 13 integration cases against Wrangler's actual local D1/workerd runtime. It starts from an empty ephemeral database, applies the migrations, and checks resumption, ownership, identity uniqueness, guest accounting, concurrent updates and draft edits, rollback, replay/retry, malformed values, and full `i64` cent precision. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
+
+Telegram credentials and user-facing application workflows will be added in later phases.
 
 ## Planned operational controls
 

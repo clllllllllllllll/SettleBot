@@ -1,5 +1,9 @@
 pub mod domain;
 mod health;
+pub mod persistence;
+
+#[cfg(all(feature = "d1-test", target_arch = "wasm32"))]
+mod persistence_test;
 
 #[cfg(test)]
 mod tests;
