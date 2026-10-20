@@ -4,13 +4,24 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phase 0 is scaffolded but verification is pending. The [Worker](../src/lib.rs) routes `GET /health` to a JSON response and returns 404 otherwise. The [CI workflow](../.github/workflows/ci.yml) defines formatting, linting, test, and build checks for pull requests and pushes to `main`, with no deployment. No automated behavior tests exist in the inspected source, and this plan does not establish a successful remote CI run. Phases 1–7 are planned and unimplemented.
+Phase 0 is implemented and locally verified, but completion still awaits successful remote CI evidence for the implementation commit. The [Worker](../src/lib.rs) routes `GET /health` to a JSON response and returns 404 otherwise; native [request tests](../src/tests.rs) exercise the same routing and response code. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phases 1–7 are planned and unimplemented.
 
 ## Phase 0 — Foundation
 
 - Keep pinned toolchains and the Rust/Workers build reproducible with locked dependencies.
-- Add automated request-level checks for `GET /health`: HTTP 200, JSON content type, and `{"status":"ok"}`; verify an unknown path and unsupported method return 404.
-- Gate: formatting, Clippy with warnings denied, tests, and the production Worker build pass. The automated health checks run in CI. Record a successful GitHub Actions run URL and its commit SHA; a workflow file or zero-test success alone is insufficient evidence.
+- Automated request-level checks cover `GET /health`: HTTP 200, JSON content type, and `{"status":"ok"}`; unknown paths and unsupported methods return 404.
+- Gate: formatting, Clippy with warnings denied, tests, and the production Worker build pass. The automated health checks run in CI. Record a successful GitHub Actions run URL and its implementation commit SHA; a workflow file or zero-test success alone is insufficient evidence.
+
+### Verification evidence
+
+Local checks passed on 2026-10-20 with the pinned toolchains:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets -- -D warnings`
+- `cargo test --locked --all-targets` — 3 passed, 0 failed.
+- `pnpm build` — release Worker build and Wrangler deployment dry run succeeded, with no configured bindings. No deployment was performed.
+
+Remote CI evidence remains pending. Record the successful GitHub Actions run URL and commit SHA containing the request tests before marking Phase 0 complete.
 
 ## Phase 1 — Domain core
 

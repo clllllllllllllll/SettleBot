@@ -8,6 +8,7 @@ SettleBot is a serverless Telegram ledger for zero-sum group game settlements. I
 
 - `src/lib.rs` — Worker entry point and top-level request routing.
 - `src/health.rs` — health-check response boundary.
+- `src/tests.rs` — native request-level routing and response tests.
 - `Cargo.toml` and `Cargo.lock` — Rust crate configuration and locked dependencies.
 - `wrangler.toml` — local and deployment configuration for Cloudflare Workers.
 - `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` — pinned Wrangler tooling and dependency-build policy.
@@ -21,7 +22,7 @@ No D1 migrations exist yet; add them with persistence implementation.
 
 Read [the implementation plan](agent_docs/implementation-plan.md) before implementation. Follow its phases in order, inspect the repository, verify recorded status against code and tests, and continue from the earliest incomplete gate. Do not skip, reorder, or expand a phase without explicit user approval. Mark a phase complete only after implementation, tests, and relevant documentation are verified.
 
-- **Phase 0 — Foundation (verification pending):** Scaffold and validation workflow exist; automated `/health` behavior coverage and successful remote CI evidence remain completion gates.
+- **Phase 0 — Foundation (remote CI pending):** Request-level behavior tests and local validation checks pass; completion awaits successful remote CI evidence for the implementation commit.
 - **Phase 1 — Domain core:** Typed money, players, guests, games, participants, session states and dates; pure invariant tests.
 - **Phase 2 — Persistence:** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and integration tests.
 - **Phase 3 — Authorized Telegram workflow:** Webhook secret, designated group, and admin checks before writes; guided sessions and admin roster/game creation.

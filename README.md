@@ -2,13 +2,13 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Foundation scaffolded; product features not yet implemented
+> **Status:** Foundation locally verified; remote CI pending; product features not yet implemented
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates. Foundation verification remains pending: automated `/health` behavior tests and evidence of a successful remote CI run are required before Phase 0 is complete. The current workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records local verification. Foundation request tests and all local validation checks pass; Phase 0 still awaits successful remote CI evidence for the implementation commit. The current workflow validates pull requests and `main`; it does not deploy.
 
 ## Overview
 
@@ -114,7 +114,9 @@ cargo test --locked --all-targets
 pnpm build
 ```
 
-The current Worker exposes `GET /health` as a minimal platform smoke check. D1 bindings, migrations, Telegram credentials, and application features will be added in later changes.
+The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) exercise the same routing and response code as the Worker, verifying HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. `pnpm build` compiles the release Worker and performs a deployment dry run.
+
+D1 bindings, migrations, Telegram credentials, and application features will be added in later changes.
 
 ## Planned operational controls
 
