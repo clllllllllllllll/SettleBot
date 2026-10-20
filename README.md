@@ -8,6 +8,8 @@ A production-minded serverless application built to demonstrate cloud architectu
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates. Foundation verification remains pending: automated `/health` behavior tests and evidence of a successful remote CI run are required before Phase 0 is complete. The current workflow validates pull requests and `main`; it does not deploy.
+
 ## Overview
 
 SettleBot records zero-sum win/loss sessions for a private Telegram group. It tracks cumulative and game-specific results while preserving exact session history and auditable corrections.
@@ -24,12 +26,14 @@ The ledger is intentionally small in scope so the project can focus on the compl
 - Services that scale to zero instead of an always-running server
 - Architecture sized for a low-traffic workload and the free tier
 
-### Continuous delivery
+### Planned delivery workflow
 
 - GitHub-based source control and change review
-- Automated Rust formatting, Clippy linting, compilation, and testing
-- Deployment gates that prevent failed builds from reaching production
-- Versioned database migrations and controlled releases
+- Pull requests run formatting, Clippy linting, tests, and a production Worker build without deploying
+- Merges to `main` run validation, then automatically deploy the successful commit to staging
+- Staging smoke tests must pass before the same commit can be promoted
+- Production deployment requires a manual approval gate
+- Versioned, backward-compatible D1 migrations run as a separate controlled step
 
 ### Environment and secret management
 
@@ -49,10 +53,11 @@ The ledger is intentionally small in scope so the project can focus on the compl
 ## Planned product capabilities
 
 - Record sessions involving any subset of roster players
-- Add one-time guests or permanent roster players
+- Let administrators add permanent roster players and games, with Mahjong and Poker as initial games
+- Include one-time guests only in their selected sessions
 - Require every session to total exactly `S$0.00`
 - Track overall and game-specific standings
-- Show dated player and session histories
+- Show player and session histories using the session's Asia/Singapore calendar date, separately from its UTC creation timestamp
 - Correct or void sessions without deleting audit history
 - Restrict changes to administrators
 - Export the ledger as CSV or JSON
@@ -63,14 +68,22 @@ One-time guests are excluded from leaderboards but remain visible in the relevan
 
 ```mermaid
 flowchart LR
-    DEV[Developer] --> GH[GitHub]
-    GH -->|CI checks and deploy| CW[Rust Cloudflare Worker]
-    TG[Telegram Group] -->|HTTPS webhook| CW
-    CW --> D1[(Cloudflare D1)]
-    CRON[Scheduled Backup] --> CW
+    DEV[Developer] --> PR[Pull request]
+    PR --> CI[Format, lint, test, and build]
+    CI -->|Merge to main| MAIN[Validate main commit]
+    MAIN -->|Success| STG[Staging Worker]
+    STG --> SMOKE[Staging smoke tests]
+    SMOKE --> GATE{Manual production approval}
+    GATE --> PROD[Production Worker]
+    TG[Telegram Group] -->|HTTPS webhook| PROD
+    STG --> D1S[(Staging D1)]
+    PROD --> D1P[(Production D1)]
+    CRON[Scheduled backup] --> D1P
 ```
 
-The intended delivery flow runs automated checks before deployment. Telegram will send updates to a secured Cloudflare Worker, which will validate permissions, apply the ledger rules, and store transactional records in D1.
+The planned delivery flow keeps pull requests deployment-free, deploys successful `main` builds to an isolated staging environment, and requires staging smoke tests plus manual approval before production promotion. Production will use a stable Worker URL for the Telegram webhook, so routine releases update the Worker behind that endpoint rather than reconfiguring the bot.
+
+Staging and production will use separate Workers, D1 databases, secrets, and Telegram test contexts. Production promotion must deploy the same verified commit tested in staging. Worker rollback does not roll back D1, so schema changes require separately controlled, backward-compatible migrations and a tested recovery path.
 
 ## Development
 
@@ -117,12 +130,12 @@ The current Worker exposes `GET /health` as a minimal platform smoke check. D1 b
 
 ## Planned environments
 
-| Environment | Purpose |
-|---|---|
-| Local | Development and testing |
-| Staging | Telegram testing with dummy data |
-| Production | Private group ledger |
+| Environment | Purpose | Deployment policy |
+|---|---|---|
+| Local | Development and testing | Manual local execution |
+| Staging | Telegram testing with dummy data | Automatic after successful `main` CI |
+| Production | Private group ledger | Manual promotion after staging verification |
 
 ## Privacy
 
-The repository will not contain Telegram tokens, production IDs, real ledger records, or Cloudflare credentials.
+The repository will not contain Telegram tokens, production IDs, real roster names, ledger records, or Cloudflare credentials. Administrators will create the private roster through the authenticated Telegram workflow after deployment.
