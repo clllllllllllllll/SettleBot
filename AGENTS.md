@@ -127,6 +127,7 @@ When writing code, follow these steps in order:
 - Keep staging and production Workers, D1 databases, secrets, and Telegram test contexts isolated.
 - Treat D1 migrations as a separate controlled operation; Worker rollback does not restore database schema or data.
 - Require server-side authorization for every state-changing Telegram action; hidden buttons are not authorization.
+- Authorize by configured numeric Telegram chat and user IDs; never trust usernames, display names, anonymous senders, or Telegram group-admin status as SettleBot authorization.
 - Design writes to be transactional and webhook handling to be idempotent before production use.
 - Keep the architecture proportional to the expected low traffic and Cloudflare free-tier constraints.
 - Keep runtime dependencies compatible with the Cloudflare Workers WebAssembly target; do not assume native threads, sockets, filesystems, or OS services are available.

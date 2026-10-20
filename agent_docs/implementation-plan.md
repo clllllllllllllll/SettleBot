@@ -54,10 +54,11 @@ Remote CI passed for implementation commit [`1b3141a65d971cb502964e89c58fb8ea8cb
 
 ## Phase 3 — Authorized Telegram workflow
 
-- Validate the webhook secret before processing an update. Enforce the designated group and server-side administrator authorization before every state change, including drafts, callbacks, roster creation, and game creation; fail closed if authorization cannot be established.
-- Store credentials and group configuration outside tracked data. Verify callback ownership and current draft state instead of trusting button payloads.
+- Validate the webhook secret before processing an update. Accept updates only from one configured numeric Telegram `chat.id`; reject private chats, other groups, channels, anonymous senders, and updates without a verifiable chat and user identity.
+- Authorize state changes through an explicit allowlist of numeric Telegram user IDs, independent of Telegram group-admin status. Never authorize by username or display name. Apply the check before drafts, callbacks, roster creation, game creation, confirmation, correction, or voiding.
+- Store the group ID, administrator IDs, credentials, and webhook secret outside tracked data with separate staging and production values. Verify every callback against its group, user, draft owner, and current draft state instead of trusting button payloads.
 - Guide administrators through game selection, occurred-on date, roster selection or one-time guest entry, signed amounts, review, and confirmation. Support admin-controlled permanent roster and game creation. Guests are selectable only within their own draft/session and never appear in normal roster pickers.
-- Gate: transport tests cover valid flows and reject missing/invalid secrets, other groups, non-admins, forged/stale callbacks, and another user's draft without writes. Verify review totals/date, guest isolation, and safe replay behavior through persistence.
+- Gate: transport tests cover valid flows and reject missing/invalid secrets, private chats, other groups, channels, anonymous senders, non-allowlisted users including Telegram group administrators, forged/stale callbacks, and another user's draft without writes. Verify review totals/date, guest isolation, and safe replay behavior through persistence.
 
 ## Phase 4 — Resilience
 

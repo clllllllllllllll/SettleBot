@@ -133,7 +133,7 @@ D1 bindings, migrations, Telegram credentials, and user-facing application workf
 - SGD amounts displayed in dollars and cents, and stored internally as integer cents for accuracy
 - Transactional session writes
 - Duplicate webhook protection
-- Group and administrator restrictions
+- Exact numeric group allowlisting and an explicit numeric SettleBot administrator allowlist
 - Per-user rate limiting
 - Indexed and paginated queries
 - Audited corrections
