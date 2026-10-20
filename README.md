@@ -2,13 +2,13 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Domain core implemented and locally verified; Phase 1 remote CI pending
+> **Status:** Domain core complete; Phase 2 persistence is next
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phase 0 is complete. Phase 1 domain types and rules pass all local checks; remote validation of the implementation commit is pending. The current workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0 and 1 are complete; the domain types and ledger rules pass local and remote validation. The current workflow validates pull requests and `main`; it does not deploy.
 
 ## Overview
 

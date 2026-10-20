@@ -2,7 +2,7 @@
 
 ## Project overview
 
-SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. The pure domain core is implemented and locally verified; persistence and Telegram product workflows remain unimplemented.
+SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. The pure domain core is implemented and verified; persistence and Telegram product workflows remain unimplemented.
 
 ## Repository structure
 
@@ -24,8 +24,8 @@ No D1 migrations exist yet; add them with persistence implementation.
 Read [the implementation plan](agent_docs/implementation-plan.md) before implementation. Follow its phases in order, inspect the repository, verify recorded status against code and tests, and continue from the earliest incomplete gate. Do not skip, reorder, or expand a phase without explicit user approval. Mark a phase complete only after implementation, tests, and relevant documentation are verified.
 
 - **Phase 0 — Foundation (complete):** Request-level behavior tests and all local and remote validation checks pass for implementation commit `71ec591`.
-- **Phase 1 — Domain core (locally verified; remote CI pending):** Typed money, players, guests, games, participants, session states and dates; 33 pure invariant tests. Record successful CI for the implementation commit before proceeding to Phase 2.
-- **Phase 2 — Persistence:** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and integration tests.
+- **Phase 1 — Domain core (complete):** Typed money, players, guests, games, participants, session states and dates; 33 pure invariant tests verified for implementation commit `1b3141a`.
+- **Phase 2 — Persistence (next):** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and integration tests.
 - **Phase 3 — Authorized Telegram workflow:** Webhook secret, designated group, and admin checks before writes; guided sessions and admin roster/game creation.
 - **Phase 4 — Resilience:** Input and rate limits, safe logs/errors, timeouts, retries, and abuse controls.
 - **Phase 5 — Reporting:** Add roster-only overall leaderboards, per-game breakdowns, player and session drill-downs, exact dates, guest visibility in relevant session details, and pagination.

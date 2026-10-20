@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phase 0 is complete. The [Worker](../src/lib.rs) routes `GET /health` to a JSON response and returns 404 otherwise; native [request tests](../src/tests.rs) exercise the same routing and response code. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phase 1 is implemented and locally verified; remote validation of its implementation commit remains pending. Phases 2–7 remain unimplemented and have not started.
+Phases 0 and 1 are complete. The [Worker](../src/lib.rs) has verified request-level health behavior, and the platform-independent [domain module](../src/domain/mod.rs) has verified ledger types and invariants. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, tests, and build checks for pull requests and pushes to `main`, with no deployment. Phase 2 is next; Phases 2–7 remain unimplemented and have not started.
 
 ## Phase 0 — Foundation
 
@@ -43,7 +43,7 @@ Local checks passed on 2026-10-20 with the pinned toolchains and the installed W
 
 Chrono was already present in the lockfile; its explicit domain dependency disables default features and adds no packages. There is no persistence or Telegram integration in the domain.
 
-Remote CI is pending: no pushed Phase 1 implementation commit or successful validation run is recorded. Phase 1 is not marked complete. Record that implementation commit SHA and a successful GitHub Actions run before beginning Phase 2.
+Remote CI passed for implementation commit [`1b3141a65d971cb502964e89c58fb8ea8cb224e0`](https://github.com/clllllllllllllll/SettleBot/commit/1b3141a65d971cb502964e89c58fb8ea8cb224e0) in [GitHub Actions run `39360377728`](https://github.com/clllllllllllllll/SettleBot/actions/runs/39360377728). The run completed formatting, Clippy, all 36 tests, and the production Worker build successfully.
 
 ## Phase 2 — Persistence
 
