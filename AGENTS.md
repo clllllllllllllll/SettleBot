@@ -2,7 +2,7 @@
 
 ## Project overview
 
-SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. Phases 0–3 are complete; Phase 3 is locally verified but has not been deployed or verified against live Telegram.
+SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. Phases 0–4 are complete locally but have not been deployed or verified against live Telegram.
 
 ## Repository structure
 
@@ -30,8 +30,8 @@ Read [the implementation plan](agent_docs/implementation-plan.md) before impleme
 - **Phase 0 — Foundation (complete):** Request-level behavior tests and all local and remote validation checks pass for implementation commit `71ec591`.
 - **Phase 1 — Domain core (complete):** Typed money, players, guests, games, participants, session states and dates; 33 pure invariant tests verified for implementation commit `1b3141a`.
 - **Phase 2 — Persistence (complete):** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and real local D1 integration tests; all local and remote validation checks pass for implementation commit `8076d50`.
-- **Phase 3 — Authorized Telegram workflow (complete locally):** Webhook secret, designated group, and numeric admin checks before writes; revision-bound guided sessions and admin roster/game creation; 56 native and 28 real local D1 tests pass. No live Telegram or deployment verification yet.
-- **Phase 4 — Resilience:** Input and rate limits, safe logs/errors, timeouts, retries, and abuse controls.
+- **Phase 3 — Authorized Telegram workflow (complete locally):** Webhook secret, designated group, and numeric admin checks before writes; revision-bound guided sessions and admin roster/game creation.
+- **Phase 4 — Resilience (complete locally):** Explicit input, participant, catalog, and page-size limits; atomic per-user throttling; bounded Telegram calls; retries restricted to idempotent rate admission; safe errors and redacted structured logs. All 63 native and 31 real local D1 tests pass. No live Telegram, remote migration, or deployment verification yet.
 - **Phase 5 — Reporting:** Add roster-only overall leaderboards, per-game breakdowns, player and session drill-downs, exact dates, guest visibility in relevant session details, and pagination.
 - **Phase 6 — Audit and recovery:** Add audited corrections and voids, CSV or JSON export, backups, recovery verification, and operational documentation.
 - **Phase 7 — Delivery and operations:** PR validation only; validated `main` commits deploy automatically to isolated staging; smoke tests and manual approval gate promotion of the same commit to production.

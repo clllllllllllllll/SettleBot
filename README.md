@@ -2,13 +2,13 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Phases 0–3 complete; Phase 3 verified locally, not deployed
+> **Status:** Phases 0–4 complete locally; not deployed
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–3 are complete; resilience is next. The Telegram workflow passes local transport and D1 tests but has not been exercised against live Telegram. The current CI workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–4 are complete locally; reporting is next. The Telegram workflow and resilience controls pass local transport and D1 tests but have not been exercised against live Telegram. The current CI workflow validates pull requests and `main`; it does not deploy.
 
 ## Overview
 
@@ -72,7 +72,7 @@ The pure [domain module](src/domain/mod.rs) defines signed integer cents, roster
 
 `occurred_on` is an explicitly selected Asia/Singapore calendar date in `YYYY-MM-DD` form, with valid years 0001–9999. `created_at` is a separately injected UTC instant. The domain reads no clock and never derives the played date from the creation instant.
 
-Identifiers are case-sensitive, nonempty ASCII letters, digits, hyphens, or underscores. Display names are trimmed, must be nonempty, and reject embedded control characters; duplicate display names are allowed because identity controls uniqueness. A guest identity includes its owning session.
+Identifiers are case-sensitive, nonempty ASCII letters, digits, hyphens, or underscores. Display names are trimmed, limited to 64 characters, must be nonempty, and reject embedded control characters; duplicate display names are allowed because identity controls uniqueness. Sessions accept at most 16 participants. A guest identity includes its owning session.
 
 The [pure tests](src/domain/tests/mod.rs) cover validation, selection and amount completeness, roster/guest separation, numeric boundaries and overflow, SGD formatting, and creation around Singapore midnight. Telegram participant pickers include active roster players only; leaderboards remain planned.
 
@@ -89,6 +89,12 @@ The authorized Telegram webhook now uses this foundation. Incomplete guided sele
 `POST /telegram/webhook` checks the webhook secret, configured numeric group ID, and explicit numeric administrator allowlist before application storage access. Private chats, other groups, channels, anonymous/bot senders, business-account messages, and unverifiable identities are rejected. Every callback and text step checks draft ownership, group, revision, and workflow stage.
 
 Administrators use `/player Name` and `/game Name` to create permanent catalog entries, then `/session` to choose a game, enter the Asia/Singapore played date, select roster players or add session-scoped guests, enter signed SGD amounts, review, and confirm a zero-cent total. `/resume SESSION_ID` restores the current prompt. Every successful mutation has an atomic durable reply keyed by Telegram update ID. See [Telegram configuration and commands](agent_docs/telegram.md).
+
+## Implemented resilience controls
+
+The webhook bounds request bodies, command text, callback data, display names, catalog creation/snapshots, and participant selections. Catalog creation stops at 24 active players or games, with D1 guards preserving the limit across concurrent requests. A validated page-size type caps future reporting requests at 50 rows. Authorized administrators are limited to 20 new update IDs per rolling minute; duplicate delivery of an admitted update remains replayable without consuming another slot, including after its original rate window expires.
+
+Outbound Telegram work has a five-second deadline. Telegram sends, workflow changes, and ledger writes are never retried inline because an ambiguous response could duplicate effects. Only idempotent rate-limit admission may retry, with at most two attempts. Static structured failure events contain a category and retryability only—never tokens, secrets, IDs, roster details, inputs, or amounts. See [Telegram resilience details](agent_docs/telegram.md#resilience-and-failure-handling).
 
 ## Target architecture
 
@@ -151,7 +157,7 @@ pnpm build
 
 The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) exercise the same routing and response code as the Worker, verifying HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. `pnpm build` compiles the release Worker and performs a deployment dry run.
 
-`pnpm test:d1` builds feature-gated Rust test modules and runs 28 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all three migrations, and checks persistence plus Telegram authorization, complete guided flows, rejected requests without writes, concurrent updates, rollback, delivery failure replay, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
+`pnpm test:d1` builds feature-gated Rust test modules and runs 31 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all four migrations, and checks persistence, Telegram authorization, complete guided flows, rejected and oversized requests without ledger writes, catalog capacity races, throttling and delayed replay, concurrent updates, rollback, timeout/delivery replay, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
 
 For local configuration, copy [.dev.vars.example](.dev.vars.example) to the ignored `.dev.vars` file and supply environment-specific values. The example is fake and cannot contact a real bot. Production and staging bindings, secrets, webhook configuration, and deployments remain separately authorized work.
 
@@ -161,9 +167,13 @@ For local configuration, copy [.dev.vars.example](.dev.vars.example) to the igno
 - Transactional session writes
 - Duplicate webhook protection
 - Exact numeric group allowlisting and an explicit numeric SettleBot administrator allowlist
+- Bounded webhook inputs, participants, catalogs, and future reporting page sizes
+- Per-administrator rolling rate limits with duplicate-update admission
+- Five-second Telegram deadlines and retries restricted to idempotent rate admission
+- Static structured error logs without request or ledger data
 - Credentials and authorization configuration read from Worker secret bindings
 
-Per-user rate limiting, bounded external-call timeouts/retries, reporting pagination, audited corrections, and backup/recovery procedures remain planned. Secret provisioning and isolated remote environments have not been configured.
+Reporting queries and pagination, audited corrections, and backup/recovery procedures remain planned. Secret provisioning and isolated remote environments have not been configured.
 
 ## Planned environments
 

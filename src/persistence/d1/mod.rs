@@ -27,7 +27,7 @@ impl D1Repository {
         Self { database }
     }
 
-    fn statement(
+    pub(super) fn statement(
         &self,
         sql: &str,
         arguments: &[D1Type<'_>],
@@ -51,7 +51,7 @@ impl D1Repository {
             .map_err(|_| PersistenceError::Corrupt("row encoding"))
     }
 
-    async fn batch(
+    pub(super) async fn batch(
         &self,
         statements: Vec<D1PreparedStatement>,
     ) -> PersistenceResult<Vec<D1Result>> {
@@ -118,7 +118,7 @@ fn storage_error(_: worker::Error) -> PersistenceError {
     PersistenceError::Storage
 }
 
-fn decode_rows<T: DeserializeOwned>(result: D1Result) -> PersistenceResult<Vec<T>> {
+pub(super) fn decode_rows<T: DeserializeOwned>(result: D1Result) -> PersistenceResult<Vec<T>> {
     result
         .results()
         .map_err(|_| PersistenceError::Corrupt("row encoding"))

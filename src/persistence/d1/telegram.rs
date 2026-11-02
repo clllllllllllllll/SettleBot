@@ -1,7 +1,10 @@
-use super::D1Repository;
+use super::{decode_rows, D1Repository};
 use crate::domain::{ConfirmedSession, Game, Player};
 use crate::persistence::{PersistentDraft, UpdateKey};
-use crate::telegram::{flow::Flow, Change, Error, Receipt, Repository, Result, Transaction};
+use crate::telegram::{
+    flow::Flow, policy, Change, Error, RateLimitRequest, RateLimiter, Receipt, Repository, Result,
+    Transaction,
+};
 use worker::{D1PreparedStatement, D1Type::Text};
 
 const FLOW: &str =
@@ -21,6 +24,21 @@ const SAVE_FLOW: &str = "
             AND telegram_flows.revision = CAST(?4 AS INTEGER) - 1 AND telegram_flows.state = 'open'
             THEN CAST(?4 AS INTEGER) ELSE -1 END,
         state = ?5, document = ?6";
+const PRUNE_RATE_EVENTS: &str = "
+    DELETE FROM telegram_rate_events
+    WHERE occurred_at < CAST(? AS INTEGER)
+      AND NOT EXISTS (SELECT 1 FROM telegram_updates
+          WHERE telegram_updates.update_key = telegram_rate_events.update_key)";
+const INSERT_RATE_EVENT: &str = "
+    INSERT INTO telegram_rate_events (update_key, owner_id, occurred_at)
+    SELECT ?1, ?2, CAST(?3 AS INTEGER)
+    WHERE EXISTS (SELECT 1 FROM telegram_rate_events WHERE update_key = ?1 AND owner_id = ?2)
+       OR (SELECT COUNT(*) FROM telegram_rate_events
+           WHERE owner_id = ?2 AND occurred_at >= CAST(?4 AS INTEGER)) < CAST(?5 AS INTEGER)
+    ON CONFLICT(update_key) DO NOTHING";
+const SELECT_RATE_ADMISSION: &str = "
+    SELECT EXISTS (SELECT 1 FROM telegram_rate_events
+        WHERE update_key = ? AND owner_id = ?) AS admitted";
 
 #[derive(serde::Deserialize)]
 struct FlowRow {
@@ -30,6 +48,51 @@ struct FlowRow {
     revision: u32,
     state: String,
     document: String,
+}
+
+#[derive(serde::Deserialize)]
+struct AdmissionRow {
+    admitted: u8,
+}
+
+impl RateLimiter for D1Repository {
+    async fn admit(&self, request: &RateLimitRequest) -> Result<bool> {
+        let statements = self.rate_statements(request)?;
+        let result = self.batch(statements).await?.pop().ok_or(Error::Storage)?;
+        Ok(decode_rows::<AdmissionRow>(result)?
+            .first()
+            .is_some_and(|row| row.admitted == 1))
+    }
+}
+
+impl D1Repository {
+    fn rate_statements(&self, request: &RateLimitRequest) -> Result<Vec<D1PreparedStatement>> {
+        let timestamp = request.now.value().timestamp();
+        let now = timestamp.to_string();
+        let cutoff = (timestamp - policy::RATE_WINDOW_SECONDS).to_string();
+        let limit = policy::MAX_REQUESTS_PER_WINDOW.to_string();
+        let key = request.key.as_str();
+        let owner = request.owner.value().to_string();
+        Ok(vec![
+            self.statement(PRUNE_RATE_EVENTS, &[Text(&cutoff)])?,
+            self.rate_insert(key, &owner, &now, &cutoff, &limit)?,
+            self.statement(SELECT_RATE_ADMISSION, &[Text(key), Text(&owner)])?,
+        ])
+    }
+
+    fn rate_insert(
+        &self,
+        key: &str,
+        owner: &str,
+        now: &str,
+        cutoff: &str,
+        limit: &str,
+    ) -> Result<D1PreparedStatement> {
+        Ok(self.statement(
+            INSERT_RATE_EVENT,
+            &[Text(key), Text(owner), Text(now), Text(cutoff), Text(limit)],
+        )?)
+    }
 }
 
 impl FlowRow {

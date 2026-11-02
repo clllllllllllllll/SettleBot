@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phases 0–3 are complete. The [Worker](../src/lib.rs) has verified request-level health behavior, the platform-independent [domain module](../src/domain/mod.rs) has verified ledger invariants, and the [persistence module](../src/persistence/mod.rs) has verified D1-backed drafts and atomic confirmation. The [Telegram module](../src/telegram/mod.rs) has locally verified authorization and guided workflows. Phase 3 has not been committed, remotely validated, or exercised against live Telegram. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks without deployment. Phases 4–7 remain unimplemented and have not started.
+Phases 0–4 are complete locally. The [Worker](../src/lib.rs) has verified request-level health behavior, the platform-independent [domain module](../src/domain/mod.rs) has verified ledger invariants and limits, and the [persistence module](../src/persistence/mod.rs) has verified D1-backed drafts, atomic confirmation, and rate admission. The [Telegram module](../src/telegram/mod.rs) has locally verified authorization, guided workflows, bounded inputs, throttling, timeouts, safe failures, and redacted logs. Phase 4 has not been committed, remotely validated, deployed, or exercised against live Telegram. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks without deployment. Phases 5–7 remain unimplemented and have not started.
 
 ## Phase 0 — Foundation
 
@@ -91,13 +91,29 @@ Local checks passed on 2026-11-02 with the pinned toolchains:
 - `pnpm test:d1` — the full suite builds the feature-gated Rust test Worker and applies all three migrations to empty local D1 databases. Final integration execution: 28 passed (13 persistence and 15 Telegram cases). Tests exercise the real HTTP adapter's rejection path, zero-write rejection, owner/revision/state guards, complete review/confirmation, roster-only pickers, guest isolation, concurrent same/different update IDs, rollback at the final receipt, retry after send failure, and full cent precision.
 - `pnpm build` — release WebAssembly build and deployment dry run succeeded; no production bindings configured. Normal output excludes both test RPC exports.
 
-Phase 3's documented local gate is complete. The changes remain uncommitted and have no new remote CI run. Outbound Telegram delivery was tested with an injected transport; no live bot, webhook, remote D1 database, or deployment was used. Cached Rust build tools ran offline. Rate limits, comprehensive input limits, external-call deadlines, and bounded retries remain Phase 4.
+Phase 3's documented local gate is complete in implementation commit `ef42b88`. There is no recorded Phase 3-specific remote CI run. Outbound Telegram delivery was tested with an injected transport; no live bot, webhook, remote D1 database, or deployment was used.
 
 ## Phase 4 — Resilience
 
 - Add explicit input sizes, participant/pagination limits, per-user rate limits, and abuse controls appropriate to low traffic. Bound external-call timeouts and retry only safe operations with limited attempts; never duplicate ledger writes.
 - Return safe user-facing errors and structured logs without tokens, secrets, private roster details, or ledger amounts. Define handling for Telegram failures, D1 failures, and authorization lookup failures.
 - Gate: tests exercise limits, malformed/oversized inputs, throttling, timeouts, retry exhaustion, redaction, and recovery after transient failures while preserving Phase 3 authorization and Phase 2 atomicity.
+
+### Verification evidence
+
+The [Telegram policy](../src/telegram/policy.rs), [rate-limit boundary](../src/telegram/rate.rs), [Worker adapter](../src/telegram/worker.rs), and [resilience migration](../migrations/0004_telegram_resilience.sql) implement this gate. Limits cover 16 KiB webhook bodies, 512-byte text commands, 64-byte callbacks, 64-character display names, 24 active players and games, 16 participants, and page sizes up to 50. Creation checks capacity before constructing a change, while D1 triggers preserve the catalog limit across concurrent requests. D1 atomically admits 20 new update IDs per administrator per rolling minute while preserving admission for duplicate delivery of an existing receipt-backed key after the original rate event expires.
+
+Telegram fetch and response handling share a five-second deadline. Telegram sends and application/ledger writes are single-attempt operations; only idempotent rate admission retries, at most twice. Errors map to safe HTTP responses, recovery prompts never echo names or amounts, and structured logs contain only a static event name, category, and retryability.
+
+Local checks passed on 2026-11-02 with the pinned toolchains:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets -- -D warnings`
+- `cargo test --locked --all-targets` — 63 passed, including limit, timeout, retry recovery/exhaustion, and log-redaction tests.
+- `pnpm test:d1` — 31 passed (13 persistence and 18 Telegram cases) after applying all four migrations to empty local D1 databases. New cases cover oversized inputs, catalog capacity and concurrent creation, atomic per-user throttling, delayed duplicate-key admission, rolling-window recovery, and timeout replay without duplicate ledger writes. Existing authorization, concurrency, and transaction rollback cases remain green.
+- `pnpm build` — release WebAssembly build and Wrangler deployment dry run succeeded; no deployment was performed.
+
+Phase 4's local gate is complete. The changes remain uncommitted and have no remote CI run. No live Telegram call, remote D1 migration, secret change, cloud resource, or deployment was used.
 
 ## Phase 5 — Reporting
 

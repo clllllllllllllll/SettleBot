@@ -19,6 +19,7 @@ pub(crate) async fn deliver(
     let reply = match handle(config, secret, body, repository, clock).await {
         Ok(reply) => reply,
         Err(Error::Invalid | Error::Stale) => Reply::text(update.chat, recovery(&update.input)),
+        Err(Error::Limit) => Reply::text(update.chat, limit_message()),
         Err(error) => return Err(error),
     };
     transport.send(&reply).await?;
@@ -26,6 +27,11 @@ pub(crate) async fn deliver(
         Some(id) => Ok(json!({"method": "answerCallbackQuery", "callback_query_id": id})),
         None => Ok(json!({"ok": true})),
     }
+}
+
+fn limit_message() -> String {
+    "That input or selection is too large. Shorten it or select fewer participants and try again."
+        .into()
 }
 
 fn recovery(input: &str) -> String {

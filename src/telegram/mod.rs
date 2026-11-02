@@ -2,13 +2,19 @@
 mod auth;
 mod commands;
 pub(crate) mod flow;
+mod logging;
+pub(crate) mod policy;
+mod rate;
 pub(crate) mod render;
+mod resilience;
 mod service;
 mod store;
 mod transport;
 pub(crate) mod worker;
 
 pub use auth::Configuration;
+pub use policy::{PageSize, MAX_PAGE_SIZE};
+pub(crate) use rate::{admit_with_retry, RateLimitRequest, RateLimiter};
 pub(crate) use service::handle;
 pub use service::Clock;
 pub(crate) use store::{Change, Receipt, Repository, Transaction};
@@ -22,6 +28,10 @@ pub enum Error {
     Rejected,
     Invalid,
     Stale,
+    Limit,
+    RateLimited,
+    Timeout,
+    Telegram,
     Storage,
     Configuration,
 }

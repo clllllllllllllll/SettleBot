@@ -1,13 +1,19 @@
 //! Workers adapter. Sends are injected; callback acknowledgements use webhook replies.
 use super::{
-    auth::SECRET_HEADER, deliver, render::Reply, Clock, Configuration, Error, Result, Transport,
+    auth::{decode, SECRET_HEADER},
+    commands::validate_address,
+    deliver,
+    render::Reply,
+    Clock, Configuration, Error, RateLimitRequest, Result, Transport,
 };
 use crate::{
     domain::CreatedAt,
     persistence::d1::{D1Repository, DATABASE_BINDING},
 };
+use futures_util::StreamExt;
 use http::{header::CONTENT_TYPE, Response, StatusCode};
-use worker::{Env, HttpRequest};
+use std::time::Duration;
+use worker::{AbortController, AbortSignal, Env, HttpRequest};
 
 pub(crate) const WEBHOOK_PATH: &str = "/telegram/webhook";
 const WEBHOOK_SECRET: &str = "TELEGRAM_WEBHOOK_SECRET";
@@ -32,16 +38,20 @@ pub(crate) async fn webhook(
     request: HttpRequest,
     environment: Env,
 ) -> worker::Result<Response<String>> {
-    response(process(request, environment).await)
+    let result = process(request, environment).await;
+    if let Err(error) = &result {
+        super::logging::record(error);
+    }
+    response(result)
 }
 
 pub(crate) fn response(result: Result<String>) -> worker::Result<Response<String>> {
     let (status, body) = match result {
         Ok(body) => (StatusCode::OK, body),
         Err(Error::Unauthorized) => (StatusCode::FORBIDDEN, "{\"error\":\"Forbidden\"}".into()),
-        Err(Error::Rejected | Error::Invalid | Error::Stale) => {
-            (StatusCode::OK, "{\"ok\":true}".into())
-        }
+        Err(
+            Error::Rejected | Error::Invalid | Error::Stale | Error::Limit | Error::RateLimited,
+        ) => (StatusCode::OK, "{\"ok\":true}".into()),
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
             "{\"error\":\"Unavailable\"}".into(),
@@ -61,9 +71,35 @@ async fn process(request: HttpRequest, environment: Env) -> Result<String> {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     config.check_secret(secret.as_deref())?;
-    let mut request: worker::Request = request.try_into().map_err(|_| Error::Invalid)?;
-    let body = request.bytes().await.map_err(|_| Error::Invalid)?;
+    let body = read_body(request).await?;
     process_body(&config, secret.as_deref(), &body, &environment).await
+}
+
+async fn read_body(request: HttpRequest) -> Result<Vec<u8>> {
+    if content_length(&request)? > super::policy::MAX_WEBHOOK_BYTES {
+        return Err(Error::Limit);
+    }
+    let mut stream = request.into_body();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        body.extend_from_slice(&chunk.map_err(|_| Error::Invalid)?);
+        if body.len() > super::policy::MAX_WEBHOOK_BYTES {
+            return Err(Error::Limit);
+        }
+    }
+    Ok(body)
+}
+
+fn content_length(request: &HttpRequest) -> Result<usize> {
+    request
+        .headers()
+        .get(http::header::CONTENT_LENGTH)
+        .map(|value| value.to_str().map_err(|_| Error::Invalid))
+        .transpose()?
+        .map(str::parse)
+        .transpose()
+        .map_err(|_| Error::Invalid)
+        .map(Option::unwrap_or_default)
 }
 
 async fn process_body(
@@ -77,11 +113,28 @@ async fn process_body(
             .d1(DATABASE_BINDING)
             .map_err(|_| Error::Configuration)?,
     );
+    admit_update(config, body, &repository, &WorkerClock).await?;
     let transport = BotApi {
         token: secret_value(environment, BOT_TOKEN)?,
     };
     let reply = deliver(config, secret, body, &repository, &WorkerClock, &transport).await?;
     serde_json::to_string(&reply).map_err(|_| Error::Storage)
+}
+
+pub(crate) async fn admit_update(
+    config: &Configuration,
+    body: &[u8],
+    limiter: &impl super::RateLimiter,
+    clock: &impl Clock,
+) -> Result<()> {
+    let update = decode(config, body)?;
+    validate_address(&update, config.bot_username())?;
+    let request = RateLimitRequest {
+        key: update.key,
+        owner: update.owner,
+        now: clock.now()?,
+    };
+    super::admit_with_retry(limiter, &request).await
 }
 
 fn configuration(environment: &Env) -> Result<Configuration> {
@@ -112,17 +165,33 @@ struct BotApi {
 impl Transport for BotApi {
     async fn send(&self, reply: &Reply) -> Result<()> {
         let request = self.request(reply)?;
-        let mut response = worker::Fetch::Request(request)
-            .send()
-            .await
-            .map_err(|_| Error::Storage)?;
-        let status = response.status_code();
-        let result: ApiResponse = response.json().await.map_err(|_| Error::Storage)?;
-        if status != StatusCode::OK.as_u16() || !result.ok {
-            return Err(Error::Storage);
+        let controller = AbortController::default();
+        let signal = controller.signal();
+        let timeout =
+            worker::Delay::from(Duration::from_secs(super::policy::TELEGRAM_TIMEOUT_SECONDS));
+        let operation = send_request(request, &signal);
+        match super::resilience::with_deadline(operation, timeout).await {
+            Ok(result) => result,
+            Err(()) => {
+                controller.abort();
+                Err(Error::Timeout)
+            }
         }
-        Ok(())
     }
+}
+
+async fn send_request(request: worker::Request, signal: &AbortSignal) -> Result<()> {
+    let fetch = worker::Fetch::Request(request);
+    let mut response = fetch
+        .send_with_signal(signal)
+        .await
+        .map_err(|_| Error::Telegram)?;
+    let status = response.status_code();
+    let result: ApiResponse = response.json().await.map_err(|_| Error::Telegram)?;
+    if status != StatusCode::OK.as_u16() || !result.ok {
+        return Err(Error::Telegram);
+    }
+    Ok(())
 }
 
 impl BotApi {

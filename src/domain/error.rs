@@ -12,6 +12,7 @@ pub enum DomainError {
     GuestOutsideSession,
     DuplicateParticipant(ParticipantId),
     TooFewParticipants,
+    TooManyParticipants,
     UnselectedParticipant(ParticipantId),
     DuplicateAmount(ParticipantId),
     MissingAmount(ParticipantId),
@@ -30,6 +31,7 @@ impl fmt::Display for DomainError {
             Self::GuestOutsideSession => formatter.write_str("guest belongs to another session"),
             Self::DuplicateParticipant(_) => formatter.write_str("participant is selected twice"),
             Self::TooFewParticipants => formatter.write_str("two or more participants required"),
+            Self::TooManyParticipants => formatter.write_str("too many participants"),
             Self::UnselectedParticipant(_) => {
                 formatter.write_str("unselected identity has an amount")
             }

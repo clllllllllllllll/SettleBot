@@ -1,5 +1,7 @@
 use super::{DomainError, GameId, GuestId, PlayerId};
 
+pub const MAX_DISPLAY_NAME_CHARS: usize = 64;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisplayName(String);
 
@@ -9,7 +11,7 @@ impl DisplayName {
         if value.is_empty() {
             return Err(DomainError::RequiredValue("display_name"));
         }
-        if value.chars().any(char::is_control) {
+        if value.chars().count() > MAX_DISPLAY_NAME_CHARS || value.chars().any(char::is_control) {
             return Err(DomainError::InvalidDisplayName);
         }
         Ok(Self(value.to_owned()))

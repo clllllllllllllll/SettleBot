@@ -41,6 +41,15 @@ pub(super) fn parse(update: &AuthorizedUpdate, bot_username: &str) -> Result<Com
     }
 }
 
+pub(super) fn validate_address(update: &AuthorizedUpdate, bot_username: &str) -> Result<()> {
+    if update.callback {
+        return Ok(());
+    }
+    let input = update.input.trim();
+    let command = input.split_once(' ').map_or(input, |(command, _)| command);
+    addressed_command(command, bot_username).map(|_| ())
+}
+
 fn addressed_command<'a>(command: &'a str, bot_username: &str) -> Result<&'a str> {
     let Some((name, addressed_bot)) = command.split_once('@') else {
         return Ok(command);

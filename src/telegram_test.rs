@@ -18,6 +18,10 @@ struct Input {
     #[serde(default)]
     fail_send: bool,
     #[serde(default)]
+    timeout_send: bool,
+    #[serde(default)]
+    rate: bool,
+    #[serde(default)]
     http: bool,
     created_at: String,
 }
@@ -31,12 +35,16 @@ impl Clock for TestClock {
 
 struct TestTransport {
     fail: bool,
+    timeout: bool,
     messages: RefCell<Vec<Value>>,
 }
 impl Transport for TestTransport {
     async fn send(&self, reply: &telegram::render::Reply) -> Result<()> {
         if self.fail {
             return Err(Error::Storage);
+        }
+        if self.timeout {
+            return Err(Error::Timeout);
         }
         self.messages
             .borrow_mut()
@@ -74,9 +82,14 @@ async fn execute(input: &str, environment: Env) -> Result<Value> {
             .map_err(|_| Error::Storage)?,
     );
     let body = serde_json::to_vec(&input.body).map_err(|_| Error::Invalid)?;
+    if input.rate {
+        telegram::worker::admit_update(&config, &body, &repository, &clock).await?;
+        return Ok(json!({"admitted": true}));
+    }
     if input.deliver {
         let transport = TestTransport {
             fail: input.fail_send,
+            timeout: input.timeout_send,
             messages: RefCell::new(Vec::new()),
         };
         let response = telegram::deliver(

@@ -6,6 +6,7 @@ use super::{
 };
 
 const MINIMUM_PARTICIPANTS: usize = 2;
+pub const MAX_SESSION_PARTICIPANTS: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionState {
@@ -115,6 +116,9 @@ impl ConfirmedSession {
 }
 
 fn validate_participants(id: &SessionId, participants: &[Participant]) -> Result<(), DomainError> {
+    if participants.len() > MAX_SESSION_PARTICIPANTS {
+        return Err(DomainError::TooManyParticipants);
+    }
     let mut selected = BTreeSet::new();
     for participant in participants {
         validate_guest_scope(id, participant)?;

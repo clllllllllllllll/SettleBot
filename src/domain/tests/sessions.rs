@@ -60,6 +60,14 @@ fn fewer_than_two_participants_cannot_be_confirmed() -> Result<(), DomainError> 
 }
 
 #[test]
+fn participant_collections_have_an_explicit_upper_bound() {
+    let participants = (0..=MAX_SESSION_PARTICIPANTS)
+        .map(|index| roster(&format!("player-{index}")))
+        .collect();
+    assert_eq!(draft(participants), Err(DomainError::TooManyParticipants));
+}
+
+#[test]
 fn every_selected_participant_requires_one_amount() -> Result<(), DomainError> {
     let participants = vec![roster("player-a"), roster("player-b")];
     let missing = participants[1].id();

@@ -158,6 +158,13 @@ pub(super) fn decode(config: &Configuration, body: &[u8]) -> Result<AuthorizedUp
         return Err(Error::Rejected);
     }
     let owner = config.authorize(&message.chat, &user)?;
+    super::policy::input(&input, callback)?;
+    if callback_id
+        .as_ref()
+        .is_some_and(|id| id.is_empty() || id.len() > super::policy::MAX_CALLBACK_ID_BYTES)
+    {
+        return Err(Error::Limit);
+    }
     Ok(AuthorizedUpdate {
         key: UpdateKey::new(&format!("telegram_{}", update.update_id))?,
         number: update.update_id,

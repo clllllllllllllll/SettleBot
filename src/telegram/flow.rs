@@ -70,7 +70,17 @@ impl Flow {
         if let Some(date) = &self.date {
             OccurredOn::parse(date)?;
         }
+        self.validate_limits()?;
         self.validate_stage()
+    }
+
+    fn validate_limits(&self) -> Result<()> {
+        let catalog_too_large = self.games.len() > super::policy::MAX_CATALOG_CHOICES
+            || self.roster.len() > super::policy::MAX_CATALOG_CHOICES;
+        if catalog_too_large || self.selected.len() > crate::domain::MAX_SESSION_PARTICIPANTS {
+            return Err(Error::Limit);
+        }
+        Ok(())
     }
 
     fn validate_stage(&self) -> Result<()> {
@@ -97,8 +107,8 @@ impl Flow {
         chat: i64,
         games: Vec<Game>,
         players: Vec<Player>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let flow = Self {
             id,
             owner: owner.value(),
             chat,
@@ -109,7 +119,9 @@ impl Flow {
             game: None,
             date: None,
             selected: Vec::new(),
-        }
+        };
+        flow.validate_limits()?;
+        Ok(flow)
     }
 
     pub fn check(&self, owner: OwnerId, chat: i64, revision: Revision) -> Result<()> {
@@ -160,6 +172,7 @@ impl Flow {
             self.selected.remove(position);
             return Ok(());
         }
+        self.check_participant_capacity()?;
         self.selected.push(Selection {
             choice,
             guest: false,
@@ -169,6 +182,7 @@ impl Flow {
     }
 
     fn add_guest(&mut self, name: &str) -> Result<()> {
+        self.check_participant_capacity()?;
         let name = DisplayName::new(name)?.as_str().to_owned();
         let id = format!("guest_{}", self.revision);
         self.selected.push(Selection {
@@ -176,6 +190,13 @@ impl Flow {
             guest: true,
             cents: None,
         });
+        Ok(())
+    }
+
+    fn check_participant_capacity(&self) -> Result<()> {
+        if self.selected.len() >= crate::domain::MAX_SESSION_PARTICIPANTS {
+            return Err(Error::Limit);
+        }
         Ok(())
     }
 

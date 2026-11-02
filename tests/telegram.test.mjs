@@ -7,7 +7,7 @@ let api, database;
 let sequence = 10000;
 const created = "2026-11-01T16:00:00Z";
 const tables = ["players", "games", "drafts", "draft_participants", "sessions", "session_entries",
-  "processed_updates", "telegram_flows", "telegram_updates"];
+  "processed_updates", "telegram_flows", "telegram_updates", "telegram_rate_events"];
 
 before(async () => {
   await server.listen();
@@ -114,6 +114,29 @@ test("real Worker HTTP adapter acknowledges permanent rejections without writes 
     assert.equal((await success(body, { http: true })).status, 200);
   }
   assert.deepEqual(await snapshot(), original);
+});
+
+test("oversized webhook, text, callback, and display-name inputs are bounded without ledger writes", async () => {
+  await rejected(message("x".repeat(513)));
+  await rejected(message(`/player ${"n".repeat(65)}`));
+  await rejected(callback("x".repeat(65)));
+  const before = await snapshot();
+  const oversized = message("x".repeat(17 * 1024));
+  assert.equal((await success(oversized, { http: true })).status, 200);
+  assert.deepEqual(await snapshot(), before);
+});
+
+test("per-user throttling is idempotent by update key and recovers after its rolling window", async () => {
+  const replay = message("/session");
+  await success(replay, { rate: true });
+  await success(replay);
+  const later = "2026-11-01T16:01:01Z";
+  for (let index = 0; index < 20; index += 1) {
+    await success(message("/session"), { rate: true, created_at: later });
+  }
+  assert.equal((await request(message("/session"), { rate: true, created_at: later })).error, "RateLimited");
+  await success(replay, { rate: true, created_at: later });
+  await success(message("/session", 101), { rate: true, created_at: later });
 });
 
 test("catalog creation uses numeric authorization and atomically replays update IDs", async () => {
@@ -271,10 +294,36 @@ test("delivery sends a typed reply and acknowledges callbacks; failed sends repl
   const update = callback(button(reply, "Confirm session"));
   assert.equal((await request(update, { deliver: true, fail_send: true })).error, "Storage");
   const persisted = await snapshot();
+  assert.equal((await request(update, { deliver: true, timeout_send: true })).error, "Timeout");
+  assert.deepEqual(await snapshot(), persisted, "timeout retry did not duplicate writes");
   const result = await success(update, { deliver: true });
   assert.deepEqual(result.response, { method: "answerCallbackQuery", callback_query_id: update.callback_query.id });
   assert.match(result.messages[0].text, /Saved/);
   assert.deepEqual(await snapshot(), persisted, "retry after send failure did not duplicate writes");
   const invalid = await success(message("/unknown"), { deliver: true });
   assert.match(invalid.messages[0].text, /Invalid or out-of-date/);
+});
+
+test("catalog creation stops at picker capacity and concurrent requests cannot exceed it", async () => {
+  let activePlayers = (await database.prepare("SELECT COUNT(*) AS n FROM players WHERE status = 'active'").first()).n;
+  while (activePlayers < 23) {
+    await database.prepare("INSERT INTO players (id, display_name, status) VALUES (?, 'Capacity Player', 'active')")
+      .bind(`capacity_player_${activePlayers}`).run();
+    activePlayers += 1;
+  }
+  const playerResults = await Promise.all([
+    request(message("/player Capacity Left")),
+    request(message("/player Capacity Right")),
+  ]);
+  assert.equal(playerResults.filter(result => result.ok).length, 1);
+  assert.equal((await database.prepare("SELECT COUNT(*) AS n FROM players WHERE status = 'active'").first()).n, 24);
+  assert.equal(await rejected(message("/player Capacity Overflow")), "Limit");
+
+  let games = (await database.prepare("SELECT COUNT(*) AS n FROM games").first()).n;
+  while (games < 24) {
+    await database.prepare("INSERT INTO games (id, display_name) VALUES (?, 'Capacity Game')")
+      .bind(`capacity_game_${games}`).run();
+    games += 1;
+  }
+  assert.equal(await rejected(message("/game Capacity Overflow")), "Limit");
 });

@@ -79,8 +79,8 @@ async fn prepare<R: Repository, C: Clock>(
 ) -> Result<Change> {
     match command {
         Command::Start => start(repository, update).await,
-        Command::Player(name) => player(update.number, &name),
-        Command::Game(name) => game(update.number, &name),
+        Command::Player(name) => add_player(repository, update.number, &name).await,
+        Command::Game(name) => add_game(repository, update.number, &name).await,
         Command::Step {
             id,
             revision,
@@ -93,6 +93,21 @@ async fn prepare<R: Repository, C: Clock>(
     }
 }
 
+async fn add_player(repository: &impl Repository, number: u64, name: &str) -> Result<Change> {
+    let players = repository.players().await?;
+    let active = players
+        .iter()
+        .filter(|player| player.status() == RosterStatus::Active)
+        .count();
+    super::policy::catalog_capacity(active)?;
+    player(number, name)
+}
+
+async fn add_game(repository: &impl Repository, number: u64, name: &str) -> Result<Change> {
+    super::policy::catalog_capacity(repository.games().await?.len())?;
+    game(number, name)
+}
+
 async fn start(repository: &impl Repository, update: &AuthorizedUpdate) -> Result<Change> {
     let games = repository.games().await?;
     let players = repository.players().await?;
@@ -102,7 +117,7 @@ async fn start(repository: &impl Repository, update: &AuthorizedUpdate) -> Resul
         update.chat,
         games,
         players,
-    )))
+    )?))
 }
 
 fn player(number: u64, name: &str) -> Result<Change> {

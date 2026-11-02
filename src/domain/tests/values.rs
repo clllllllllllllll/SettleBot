@@ -53,6 +53,11 @@ fn names_require_visible_values_without_control_characters() -> Result<(), Domai
     }
     assert_eq!(DisplayName::new("  Player A  ")?.as_str(), "Player A");
     assert_eq!(DisplayName::new("访客")?.as_str(), "访客");
+    assert!(DisplayName::new(&"a".repeat(MAX_DISPLAY_NAME_CHARS)).is_ok());
+    assert_eq!(
+        DisplayName::new(&"a".repeat(MAX_DISPLAY_NAME_CHARS + 1)),
+        Err(DomainError::InvalidDisplayName)
+    );
     Ok(())
 }
 

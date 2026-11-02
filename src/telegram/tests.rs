@@ -4,9 +4,10 @@ use super::{
     flow::Flow,
     *,
 };
-use crate::domain::{Cents, CreatedAt, Game, Player};
-use crate::persistence::{GameRepository, PersistenceResult, RosterRepository, UpdateKey};
+use crate::domain::{Cents, CreatedAt, DisplayName, Game, GameId, Player};
+use crate::persistence::{GameRepository, OwnerId, PersistenceResult, RosterRepository, UpdateKey};
 use serde_json::{json, Value};
+use std::cell::Cell;
 
 fn config() -> Configuration {
     Configuration::new(
@@ -187,12 +188,178 @@ fn http_errors_are_safe_and_retry_only_storage_or_configuration_failures() {
         (Error::Rejected, 200),
         (Error::Invalid, 200),
         (Error::Stale, 200),
+        (Error::Limit, 200),
+        (Error::RateLimited, 200),
+        (Error::Timeout, 503),
+        (Error::Telegram, 503),
         (Error::Storage, 503),
         (Error::Configuration, 503),
     ] {
         let response = worker::response(Err(error)).unwrap();
         assert_eq!(response.status().as_u16(), status);
         assert_eq!(response.headers()["content-type"], "application/json");
+    }
+}
+
+#[test]
+fn update_and_pagination_sizes_are_explicitly_bounded() {
+    assert_eq!(PageSize::new(0), Err(Error::Limit));
+    assert_eq!(PageSize::new(MAX_PAGE_SIZE + 1), Err(Error::Limit));
+    assert_eq!(PageSize::new(MAX_PAGE_SIZE).unwrap().value(), MAX_PAGE_SIZE);
+    assert_eq!(
+        policy::catalog_capacity(policy::MAX_CATALOG_CHOICES - 1),
+        Ok(())
+    );
+    assert_eq!(
+        policy::catalog_capacity(policy::MAX_CATALOG_CHOICES),
+        Err(Error::Limit)
+    );
+
+    let mut text = message();
+    text["message"]["text"] = json!("x".repeat(policy::MAX_TEXT_BYTES + 1));
+    assert!(matches!(
+        decode(&config(), text.to_string().as_bytes()),
+        Err(Error::Limit)
+    ));
+
+    let mut callback = callback_update("x");
+    callback["callback_query"]["data"] = json!("x".repeat(policy::MAX_CALLBACK_BYTES + 1));
+    assert!(matches!(
+        decode(&config(), callback.to_string().as_bytes()),
+        Err(Error::Limit)
+    ));
+}
+
+#[test]
+fn catalog_snapshots_have_an_explicit_upper_bound() {
+    let games = (0..=policy::MAX_CATALOG_CHOICES)
+        .map(|index| {
+            Game::new(
+                GameId::new(&format!("g{index}")).unwrap(),
+                DisplayName::new("Game").unwrap(),
+            )
+        })
+        .collect();
+    assert!(matches!(
+        Flow::new("t1".into(), OwnerId::new(100).unwrap(), -100, games, vec![]),
+        Err(Error::Limit)
+    ));
+}
+
+#[test]
+fn guided_selection_enforces_the_domain_participant_limit() {
+    let selected = (0..crate::domain::MAX_SESSION_PARTICIPANTS)
+        .map(|index| flow::Selection {
+            choice: flow::Choice {
+                id: format!("guest_{index}"),
+                name: "Sample Guest".into(),
+            },
+            guest: true,
+            cents: None,
+        })
+        .collect();
+    let mut flow = participant_flow(selected);
+    assert_eq!(
+        flow.advance(commands::Action::Guest("Another Guest".into())),
+        Err(Error::Limit)
+    );
+}
+
+fn participant_flow(selected: Vec<flow::Selection>) -> Flow {
+    Flow {
+        id: "t1".into(),
+        owner: 100,
+        chat: -100,
+        revision: 0,
+        stage: flow::Stage::Participants,
+        games: vec![],
+        roster: vec![],
+        game: Some(flow::Choice {
+            id: "poker".into(),
+            name: "Poker".into(),
+        }),
+        date: Some("2026-11-01".into()),
+        selected,
+    }
+}
+
+#[test]
+fn only_idempotent_rate_admission_is_retried_and_recovers() {
+    let request = rate_request();
+    let transient = FailingLimiter::new(1);
+    assert_eq!(run(admit_with_retry(&transient, &request)), Ok(()));
+    assert_eq!(transient.calls.get(), policy::SAFE_RETRY_ATTEMPTS);
+
+    let unavailable = FailingLimiter::new(policy::SAFE_RETRY_ATTEMPTS);
+    assert_eq!(
+        run(admit_with_retry(&unavailable, &request)),
+        Err(Error::Storage)
+    );
+    assert_eq!(unavailable.calls.get(), policy::SAFE_RETRY_ATTEMPTS);
+}
+
+#[test]
+fn deadlines_report_completion_and_timeout_without_sleeping() {
+    let ready = std::future::ready(7);
+    let never = std::future::pending::<()>();
+    assert_eq!(run(resilience::with_deadline(ready, never)), Ok(7));
+    let never = std::future::pending::<u8>();
+    assert_eq!(
+        run(resilience::with_deadline(never, std::future::ready(()))),
+        Err(())
+    );
+}
+
+#[test]
+fn structured_failure_events_never_contain_request_data() {
+    let sensitive = ["fake_secret", "Private Player", "-1250", "telegram_123"];
+    for error in [
+        Error::Rejected,
+        Error::Limit,
+        Error::Timeout,
+        Error::Storage,
+    ] {
+        let encoded = serde_json::to_string(&logging::event(&error)).unwrap();
+        assert!(sensitive.iter().all(|value| !encoded.contains(value)));
+        assert!(encoded.contains("telegram_webhook_failed"));
+    }
+}
+
+fn callback_update(data: &str) -> Value {
+    json!({"update_id": 2, "callback_query": {"id": "fake", "from": {"id": 100,
+        "is_bot": false}, "message": message()["message"], "data": data}})
+}
+
+fn rate_request() -> RateLimitRequest {
+    RateLimitRequest {
+        key: UpdateKey::new("telegram_1").unwrap(),
+        owner: OwnerId::new(100).unwrap(),
+        now: CreatedAt::parse("2026-11-01T16:00:00Z").unwrap(),
+    }
+}
+
+struct FailingLimiter {
+    failures: Cell<usize>,
+    calls: Cell<usize>,
+}
+
+impl FailingLimiter {
+    fn new(failures: usize) -> Self {
+        Self {
+            failures: Cell::new(failures),
+            calls: Cell::new(0),
+        }
+    }
+}
+
+impl RateLimiter for FailingLimiter {
+    async fn admit(&self, _: &RateLimitRequest) -> Result<bool> {
+        self.calls.set(self.calls.get() + 1);
+        if self.failures.get() == 0 {
+            return Ok(true);
+        }
+        self.failures.set(self.failures.get() - 1);
+        Err(Error::Storage)
     }
 }
 
