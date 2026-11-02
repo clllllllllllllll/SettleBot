@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phases 0 and 1 are complete. The [Worker](../src/lib.rs) has verified request-level health behavior, and the platform-independent [domain module](../src/domain/mod.rs) has verified ledger types and invariants. Phase 2 persistence is implemented and locally verified; successful remote CI evidence remains pending, so Phase 2 is not complete. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks for pull requests and pushes to `main`, with no deployment. Phases 3–7 remain unimplemented and have not started.
+Phases 0–3 are complete. The [Worker](../src/lib.rs) has verified request-level health behavior, the platform-independent [domain module](../src/domain/mod.rs) has verified ledger invariants, and the [persistence module](../src/persistence/mod.rs) has verified D1-backed drafts and atomic confirmation. The [Telegram module](../src/telegram/mod.rs) has locally verified authorization and guided workflows. Phase 3 has not been committed, remotely validated, or exercised against live Telegram. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks without deployment. Phases 4–7 remain unimplemented and have not started.
 
 ## Phase 0 — Foundation
 
@@ -52,7 +52,7 @@ Remote CI passed for implementation commit [`1b3141a65d971cb502964e89c58fb8ea8cb
 - Commit confirmation, all participant entries, draft consumption, and the successful idempotency result atomically. Distinguish replay of one update from a second confirmation update targeting the same draft. A failed transaction must not leave a success marker or partial ledger changes.
 - Gate: local D1 integration tests apply migrations from an empty database and verify draft resumption, unique participants, valid guest accounting, duplicate-update replay, double confirmation, concurrent confirmations, injected write failure and rollback, and retry after failure or lost response. Each successful draft produces exactly one session; unrelated players remain unchanged.
 
-### Local verification evidence — remote CI pending
+### Verification evidence
 
 The [persistence module](../src/persistence/mod.rs), [migrations](../migrations/), and [local D1 integration tests](../tests/d1.test.mjs) implement this phase. The [persistence notes](persistence.md) document the atomic write strategy, stable identity policy, integer precision, and the verified need for a test-only Wasm/RPC bridge.
 
@@ -68,7 +68,7 @@ Local checks passed on 2026-10-20 with Rust 1.99.0/MSVC, Node.js 24.19.0, pnpm 1
 
 Normal builds exclude the feature-gated test RPC bridge. The pinned local workerd rejects `2026-10-14` and reports `2026-10-13` as its newest date, so only the isolated test configuration uses `2026-10-13`. Production configuration is unchanged. Cached build tools ran in offline mode. No remote resources, migrations, secrets, webhooks, or deployments were used.
 
-Remaining gate: record a successful GitHub Actions run URL and the corresponding implementation commit SHA after authorized commit/push and remote validation. Phase 3 has not started.
+Remote CI passed for implementation commit [`8076d50f163cc39fb9dcb12549fdf836216818cc`](https://github.com/clllllllllllllll/SettleBot/commit/8076d50f163cc39fb9dcb12549fdf836216818cc) in [GitHub Actions run `39384311556`](https://github.com/clllllllllllllll/SettleBot/actions/runs/39384311556). The run completed formatting, Clippy, all native tests, real local D1 integration tests, and the production Worker build successfully, closing Phase 2.
 
 ## Phase 3 — Authorized Telegram workflow
 
@@ -77,6 +77,21 @@ Remaining gate: record a successful GitHub Actions run URL and the corresponding
 - Store the group ID, administrator IDs, credentials, and webhook secret outside tracked data with separate staging and production values. Verify every callback against its group, user, draft owner, and current draft state instead of trusting button payloads.
 - Guide administrators through game selection, occurred-on date, roster selection or one-time guest entry, signed amounts, review, and confirmation. Support admin-controlled permanent roster and game creation. Guests are selectable only within their own draft/session and never appear in normal roster pickers.
 - Gate: transport tests cover valid flows and reject missing/invalid secrets, private chats, other groups, channels, anonymous senders, non-allowlisted users including Telegram group administrators, forged/stale callbacks, and another user's draft without writes. Verify review totals/date, guest isolation, and safe replay behavior through persistence.
+
+### Verification evidence
+
+The [Telegram module](../src/telegram/mod.rs), [workflow migration](../migrations/0003_telegram_workflow.sql), and [Telegram integration tests](../tests/telegram.test.mjs) implement this gate. [Telegram notes](telegram.md) describe the commands, required secrets, authorization boundary, and delivery limitations. The original Phase 2 completion evidence is retained above.
+
+Local checks passed on 2026-11-02 with the pinned toolchains:
+
+- `pnpm install --frozen-lockfile`
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets -- -D warnings`
+- `cargo test --locked --all-targets` — 56 passed, including 12 new authorization, parsing, and HTTP-response tests.
+- `pnpm test:d1` — the full suite builds the feature-gated Rust test Worker and applies all three migrations to empty local D1 databases. Final integration execution: 28 passed (13 persistence and 15 Telegram cases). Tests exercise the real HTTP adapter's rejection path, zero-write rejection, owner/revision/state guards, complete review/confirmation, roster-only pickers, guest isolation, concurrent same/different update IDs, rollback at the final receipt, retry after send failure, and full cent precision.
+- `pnpm build` — release WebAssembly build and deployment dry run succeeded; no production bindings configured. Normal output excludes both test RPC exports.
+
+Phase 3's documented local gate is complete. The changes remain uncommitted and have no new remote CI run. Outbound Telegram delivery was tested with an injected transport; no live bot, webhook, remote D1 database, or deployment was used. Cached Rust build tools ran offline. Rate limits, comprehensive input limits, external-call deadlines, and bounded retries remain Phase 4.
 
 ## Phase 4 — Resilience
 

@@ -2,13 +2,13 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Domain core complete; Phase 2 persistence locally verified, remote CI pending
+> **Status:** Phases 0–3 complete; Phase 3 verified locally, not deployed
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0 and 1 are complete. Phase 2 persistence passes local validation and awaits a successful remote CI run before completion. The current workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–3 are complete; resilience is next. The Telegram workflow passes local transport and D1 tests but has not been exercised against live Telegram. The current CI workflow validates pull requests and `main`; it does not deploy.
 
 ## Overview
 
@@ -50,7 +50,7 @@ The ledger is intentionally small in scope so the project can focus on the compl
 - Deployment, rollback, and recovery runbooks
 - Documented cost limits and migration options
 
-## Planned product capabilities
+## Product scope
 
 - Record sessions involving any subset of roster players
 - Let administrators add permanent roster players and games, with Mahjong and Poker as initial games
@@ -64,6 +64,8 @@ The ledger is intentionally small in scope so the project can focus on the compl
 
 One-time guests are excluded from leaderboards but remain visible in the relevant session details.
 
+Session entry and administrator roster/game creation are implemented. Reporting, audited corrections, exports, and operational delivery remain planned.
+
 ## Implemented domain core
 
 The pure [domain module](src/domain/mod.rs) defines signed integer cents, roster players and status, games, session-scoped guests, participant selections, and draft/confirmed sessions. Confirmation requires one game, at least two distinct participants, exactly one amount for every selected identity, and a checked zero-cent total. Guest amounts count in that total; guests remain a separate type from roster players. Confirmed records expose no mutation API.
@@ -72,7 +74,7 @@ The pure [domain module](src/domain/mod.rs) defines signed integer cents, roster
 
 Identifiers are case-sensitive, nonempty ASCII letters, digits, hyphens, or underscores. Display names are trimmed, must be nonempty, and reject embedded control characters; duplicate display names are allowed because identity controls uniqueness. A guest identity includes its owning session.
 
-The [pure tests](src/domain/tests/mod.rs) cover validation, selection and amount completeness, roster/guest separation, numeric boundaries and overflow, SGD formatting, and creation around Singapore midnight. Normal roster pickers, leaderboards, authorization, and Telegram workflows remain planned.
+The [pure tests](src/domain/tests/mod.rs) cover validation, selection and amount completeness, roster/guest separation, numeric boundaries and overflow, SGD formatting, and creation around Singapore midnight. Telegram participant pickers include active roster players only; leaderboards remain planned.
 
 ## Implemented persistence
 
@@ -80,7 +82,13 @@ The [persistence module](src/persistence/mod.rs) provides injected repository co
 
 Drafts retain their numeric owner, selected game and date, ordered roster/guest participants, partial integer-cent amounts, revision, and open/consumed state. Confirmation validates the complete zero-sum session and commits its entries, draft consumption, and idempotent result in one D1 batch. Replaying the same update returns its original result; a different update against a consumed draft is rejected. The [persistence notes](agent_docs/persistence.md) describe the transaction and local test boundary.
 
-This is a persistence foundation without public write routes. The Worker still exposes only its health check; Telegram authorization and workflows start in Phase 3.
+The authorized Telegram webhook now uses this foundation. Incomplete guided selections live in durable workflow records; confirmation creates and consumes the validated ledger draft in the same atomic batch as the session and both replay records.
+
+## Implemented Telegram workflow
+
+`POST /telegram/webhook` checks the webhook secret, configured numeric group ID, and explicit numeric administrator allowlist before application storage access. Private chats, other groups, channels, anonymous/bot senders, business-account messages, and unverifiable identities are rejected. Every callback and text step checks draft ownership, group, revision, and workflow stage.
+
+Administrators use `/player Name` and `/game Name` to create permanent catalog entries, then `/session` to choose a game, enter the Asia/Singapore played date, select roster players or add session-scoped guests, enter signed SGD amounts, review, and confirm a zero-cent total. `/resume SESSION_ID` restores the current prompt. Every successful mutation has an atomic durable reply keyed by Telegram update ID. See [Telegram configuration and commands](agent_docs/telegram.md).
 
 ## Target architecture
 
@@ -143,21 +151,19 @@ pnpm build
 
 The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) exercise the same routing and response code as the Worker, verifying HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. `pnpm build` compiles the release Worker and performs a deployment dry run.
 
-`pnpm test:d1` builds a separate feature-gated Rust test module and runs 13 integration cases against Wrangler's actual local D1/workerd runtime. It starts from an empty ephemeral database, applies the migrations, and checks resumption, ownership, identity uniqueness, guest accounting, concurrent updates and draft edits, rollback, replay/retry, malformed values, and full `i64` cent precision. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
+`pnpm test:d1` builds feature-gated Rust test modules and runs 28 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all three migrations, and checks persistence plus Telegram authorization, complete guided flows, rejected requests without writes, concurrent updates, rollback, delivery failure replay, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
 
-Telegram credentials and user-facing application workflows will be added in later phases.
+For local configuration, copy [.dev.vars.example](.dev.vars.example) to the ignored `.dev.vars` file and supply environment-specific values. The example is fake and cannot contact a real bot. Production and staging bindings, secrets, webhook configuration, and deployments remain separately authorized work.
 
-## Planned operational controls
+## Operational controls
 
 - SGD amounts displayed in dollars and cents, and stored internally as integer cents for accuracy
 - Transactional session writes
 - Duplicate webhook protection
 - Exact numeric group allowlisting and an explicit numeric SettleBot administrator allowlist
-- Per-user rate limiting
-- Indexed and paginated queries
-- Audited corrections
-- Encrypted secrets
-- Backup and recovery procedures
+- Credentials and authorization configuration read from Worker secret bindings
+
+Per-user rate limiting, bounded external-call timeouts/retries, reporting pagination, audited corrections, and backup/recovery procedures remain planned. Secret provisioning and isolated remote environments have not been configured.
 
 ## Planned environments
 

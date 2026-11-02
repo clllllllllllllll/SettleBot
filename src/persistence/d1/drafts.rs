@@ -16,8 +16,7 @@ use super::{
 impl DraftRepository for D1Repository {
     async fn create_draft(&self, draft: &PersistentDraft) -> PersistenceResult<()> {
         draft.check_edit(draft.owner(), Revision::default())?;
-        let mut statements = vec![self.create_header(draft)?];
-        self.draft_participants(&mut statements, draft)?;
+        let statements = self.create_statements(draft)?;
         match self.batch(statements).await {
             Ok(_) => Ok(()),
             Err(_) if self.draft(draft.session().id()).await?.is_some() => {
@@ -50,6 +49,16 @@ impl DraftRepository for D1Repository {
 }
 
 impl D1Repository {
+    pub(super) fn create_statements(
+        &self,
+        draft: &PersistentDraft,
+    ) -> PersistenceResult<Vec<D1PreparedStatement>> {
+        draft.check_edit(draft.owner(), Revision::default())?;
+        let mut statements = vec![self.create_header(draft)?];
+        self.draft_participants(&mut statements, draft)?;
+        Ok(statements)
+    }
+
     async fn check_current_edit(
         &self,
         draft: &PersistentDraft,

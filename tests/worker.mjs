@@ -5,4 +5,8 @@ export default class PersistenceTests extends RustWorker {
   command(input) {
     return super.persistence_test_command(input, this.env);
   }
+
+  telegram(input) {
+    return super.telegram_test_request(input, this.env);
+  }
 }

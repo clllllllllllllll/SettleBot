@@ -2,7 +2,7 @@
 
 ## Boundaries
 
-[Repository contracts](../src/persistence/repositories.rs) separate roster, game, draft, session/entry, processed-update, and atomic-confirmation storage from the [use cases](../src/persistence/use_cases.rs). The [D1 adapter](../src/persistence/d1/mod.rs) accepts an injected `worker::D1Database`; the pure domain and use cases do not depend on Workers. The HTTP entry point has no write routes.
+[Repository contracts](../src/persistence/repositories.rs) separate roster, game, draft, session/entry, processed-update, and atomic-confirmation storage from the [use cases](../src/persistence/use_cases.rs). The [D1 adapter](../src/persistence/d1/mod.rs) accepts an injected `worker::D1Database`; the pure domain and use cases do not depend on Workers. Writes at the HTTP entry point are restricted to the authorized Telegram webhook.
 
 Persistent drafts hold a validated domain selection, numeric owner, partial amounts, revision and state. Every database read rebuilds validated identifiers, names, dates and participant selections. Session reads also run the original domain confirmation checks. Malformed records return a typed corruption error; storage failures do not become successful results.
 
@@ -22,12 +22,16 @@ Confirmation first checks the durable update result, then verifies owner, open s
 
 The same update key returns its original session and creation instant, including after a lost response. A key reused for a different owner/draft is rejected. Another update against a consumed draft returns `DraftConsumed`. After a failed attempt, the use case rechecks the result before classifying draft conflicts, including when another request finishes between the initial result lookup and draft read. Failures never persist a success marker. Confirmed sessions expose no update/delete API; audited correction remains Phase 6.
 
+## Telegram workflow transactions
+
+Phase 3 adds [0003](../migrations/0003_telegram_workflow.sql) for partial Telegram selections and replay receipts. Guided selections start before a game/date is known, so they cannot yet form a domain `DraftSession`. Their document retains catalog choices, owner, group, revision, stage, selections, and integer amounts. Reads validate stored metadata and domain values. Every step atomically compares the revision and commits its reply. Confirmation creates the validated persistent draft, reuses the Phase 2 confirmation statements, consumes the workflow, and stores both `processed_updates` and the Telegram receipt in one batch. Catalog creation also commits its receipt atomically. See [Telegram notes](telegram.md).
+
 ## Local tests and limitations
 
-`pnpm test:d1` runs the production Rust use cases and D1 adapter inside Wrangler's real local workerd runtime. Native tests cannot execute `worker::D1Database`, whose implementation calls JavaScript bindings. A separate `d1-test` feature therefore exports a test RPC function; [the small test-only JavaScript wrapper](../tests/worker.mjs) injects the Worker environment. The normal build excludes that export. There are no test HTTP endpoints, extra backend services or new JavaScript dependencies.
+`pnpm test:d1` runs the production Rust use cases, Telegram application boundary, and D1 adapter inside Wrangler's real local workerd runtime. Native tests cannot execute `worker::D1Database`, whose implementation calls JavaScript bindings. A separate `d1-test` feature exports test RPC functions; [the small test-only JavaScript wrapper](../tests/worker.mjs) injects the Worker environment. The normal build excludes those exports. There are no test HTTP endpoints, extra backend services or new JavaScript dependencies. Telegram tests inject a fake clock and transport; HTTP rejection tests use generic fake bindings.
 
 The harness uses Wrangler 4.150.0's `createTestHarness`, `getEnv`, `getExport` and `applyD1Migrations` APIs with ephemeral local storage. It verifies an empty schema before migrations and fails if unexpected application tables exist. Failure triggers inject errors in the real database at intermediate entry and final result writes, then tests check all rollback effects and safe retry. A separate native unit repository tests the deterministic lookup race; it is not counted as a D1 integration test.
 
-The pinned workerd reports `2026-10-13` as its newest compatibility date and rejects the production `2026-10-14` date. Only [the test configuration](../tests/wrangler.toml) uses `2026-10-13`; the production configuration remains unchanged. These tests do not prove remote D1 behavior, deployment configuration or Telegram authorization. A successful remote CI run is still required to close Phase 2.
+The pinned workerd reports `2026-10-13` as its newest compatibility date and rejects the production `2026-10-14` date. Only [the test configuration](../tests/wrangler.toml) uses `2026-10-13`; the production configuration remains unchanged. Remote CI passed for implementation commit [`8076d50`](https://github.com/clllllllllllllll/SettleBot/commit/8076d50f163cc39fb9dcb12549fdf836216818cc) in [run `39384311556`](https://github.com/clllllllllllllll/SettleBot/actions/runs/39384311556), closing Phase 2. These tests and CI do not prove remote D1 behavior, deployment configuration or Telegram authorization.
 
 `pnpm db:migrate:local` targets only the `local` configuration and local D1 storage. Local placeholder database IDs are not staging/production resources. Remote migrations remain a separately authorized operation; Worker rollback does not restore schema or data.

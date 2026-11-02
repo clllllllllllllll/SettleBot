@@ -1,9 +1,13 @@
 pub mod domain;
 mod health;
 pub mod persistence;
+pub mod telegram;
 
 #[cfg(all(feature = "d1-test", target_arch = "wasm32"))]
 mod persistence_test;
+
+#[cfg(all(feature = "d1-test", target_arch = "wasm32"))]
+mod telegram_test;
 
 #[cfg(test)]
 mod tests;
@@ -16,9 +20,12 @@ const HEALTH_PATH: &str = "/health";
 #[event(fetch)]
 async fn fetch(
     request: HttpRequest,
-    _environment: Env,
+    environment: Env,
     _context: Context,
 ) -> Result<Response<String>> {
+    if request.uri().path() == telegram::worker::WEBHOOK_PATH && request.method() == Method::POST {
+        return telegram::worker::webhook(request, environment).await;
+    }
     handle_request(request)
 }
 

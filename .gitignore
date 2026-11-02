@@ -4,6 +4,7 @@
 /node_modules/
 /.pnpm-store/
 /.wrangler/
+/tests/.wrangler/
 
 .env*
 !.env.example

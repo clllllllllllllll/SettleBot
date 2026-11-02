@@ -15,13 +15,7 @@ impl ConfirmationRepository for D1Repository {
         revision: Revision,
         session: &ConfirmedSession,
     ) -> PersistenceResult<Confirmation> {
-        let mut statements = vec![self.confirm_header(owner, revision, session)?];
-        self.confirm_entries(&mut statements, session)?;
-        statements.push(self.statement(sql::CONSUME_DRAFT, &[Text(session.id().as_str())])?);
-        statements.push(self.statement(
-            sql::PROCESS_UPDATE,
-            &[Text(key.as_str()), Text(session.id().as_str())],
-        )?);
+        let statements = self.confirmation_statements(key, owner, revision, session)?;
         self.batch(statements).await?;
         Ok(Confirmation {
             session_id: session.id().clone(),
@@ -32,6 +26,23 @@ impl ConfirmationRepository for D1Repository {
 }
 
 impl D1Repository {
+    pub(super) fn confirmation_statements(
+        &self,
+        key: &UpdateKey,
+        owner: OwnerId,
+        revision: Revision,
+        session: &ConfirmedSession,
+    ) -> PersistenceResult<Vec<D1PreparedStatement>> {
+        let mut statements = vec![self.confirm_header(owner, revision, session)?];
+        self.confirm_entries(&mut statements, session)?;
+        statements.push(self.statement(sql::CONSUME_DRAFT, &[Text(session.id().as_str())])?);
+        statements.push(self.statement(
+            sql::PROCESS_UPDATE,
+            &[Text(key.as_str()), Text(session.id().as_str())],
+        )?);
+        Ok(statements)
+    }
+
     fn confirm_header(
         &self,
         owner: OwnerId,

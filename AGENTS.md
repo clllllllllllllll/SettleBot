@@ -2,7 +2,7 @@
 
 ## Project overview
 
-SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. The pure domain core is complete. Phase 2 persistence is implemented and locally verified, with remote CI pending; Telegram product workflows remain unimplemented.
+SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. Phases 0–3 are complete; Phase 3 is locally verified but has not been deployed or verified against live Telegram.
 
 ## Repository structure
 
@@ -11,6 +11,7 @@ SettleBot is a serverless Telegram ledger for zero-sum group game settlements. I
 - `src/tests.rs` — native request-level routing and response tests.
 - `src/domain/` — platform-independent ledger types, confirmation rules, and pure tests.
 - `src/persistence/` — injected repository contracts, use cases, and the D1 adapter.
+- `src/telegram/` — webhook authorization, guided workflow, replies, and injected transport.
 - `migrations/` — versioned schema and Mahjong/Poker seed migrations.
 - `tests/` and `src/persistence_test.rs` — local D1/workerd integration harness and feature-gated Rust RPC bridge.
 - `Cargo.toml` and `Cargo.lock` — Rust crate configuration and locked dependencies.
@@ -20,7 +21,7 @@ SettleBot is a serverless Telegram ledger for zero-sum group game settlements. I
 - `agent_docs/implementation-plan.md` — authoritative phase status and testable completion gates.
 - `README.md` — product scope, architecture, development, operations, and privacy constraints.
 
-See [persistence notes](agent_docs/persistence.md) for transaction rules and the test-only JavaScript boundary. Normal Worker builds exclude the test RPC export and expose no persistence write endpoints.
+See [persistence notes](agent_docs/persistence.md) for transaction rules and the test-only JavaScript boundary, and [Telegram notes](agent_docs/telegram.md) for commands and configuration. Normal Worker builds exclude test RPC exports; writes are available only through the authorized Telegram webhook.
 
 ## Authoritative implementation phases
 
@@ -28,8 +29,8 @@ Read [the implementation plan](agent_docs/implementation-plan.md) before impleme
 
 - **Phase 0 — Foundation (complete):** Request-level behavior tests and all local and remote validation checks pass for implementation commit `71ec591`.
 - **Phase 1 — Domain core (complete):** Typed money, players, guests, games, participants, session states and dates; 33 pure invariant tests verified for implementation commit `1b3141a`.
-- **Phase 2 — Persistence (local gates verified; remote CI pending):** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and real local D1 integration tests. Do not mark complete before successful remote validation evidence.
-- **Phase 3 — Authorized Telegram workflow:** Webhook secret, designated group, and admin checks before writes; guided sessions and admin roster/game creation.
+- **Phase 2 — Persistence (complete):** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and real local D1 integration tests; all local and remote validation checks pass for implementation commit `8076d50`.
+- **Phase 3 — Authorized Telegram workflow (complete locally):** Webhook secret, designated group, and numeric admin checks before writes; revision-bound guided sessions and admin roster/game creation; 56 native and 28 real local D1 tests pass. No live Telegram or deployment verification yet.
 - **Phase 4 — Resilience:** Input and rate limits, safe logs/errors, timeouts, retries, and abuse controls.
 - **Phase 5 — Reporting:** Add roster-only overall leaderboards, per-game breakdowns, player and session drill-downs, exact dates, guest visibility in relevant session details, and pagination.
 - **Phase 6 — Audit and recovery:** Add audited corrections and voids, CSV or JSON export, backups, recovery verification, and operational documentation.

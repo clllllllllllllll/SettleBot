@@ -7,6 +7,7 @@ mod drafts;
 mod records;
 mod sessions;
 mod sql;
+mod telegram;
 
 use serde::de::DeserializeOwned;
 use worker::{D1Database, D1PreparedStatement, D1Result, D1Type};
