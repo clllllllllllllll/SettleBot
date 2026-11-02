@@ -1,5 +1,5 @@
 use super::{auth::AuthorizedUpdate, Error, Result};
-use crate::domain::{Cents, SessionId};
+use crate::domain::{Cents, GameId, PlayerId, SessionId};
 use crate::persistence::Revision;
 
 pub(super) enum Command {
@@ -7,11 +7,20 @@ pub(super) enum Command {
     Player(String),
     Game(String),
     Resume(SessionId),
+    Report(ReportCommand),
     Step {
         id: SessionId,
         revision: Revision,
         action: Action,
     },
+}
+
+pub(super) enum ReportCommand {
+    Leaderboard { page: u32 },
+    GameLeaderboard { game: GameId, page: u32 },
+    Player { player: PlayerId, page: u32 },
+    History { page: u32 },
+    Session { session: SessionId },
 }
 
 pub(super) enum Action {
@@ -37,8 +46,76 @@ pub(super) fn parse(update: &AuthorizedUpdate, bot_username: &str) -> Result<Com
         "/game" => Ok(Command::Game(value.to_owned())),
         "/resume" => Ok(Command::Resume(SessionId::new(value)?)),
         "/step" | "/guest" => text_step(value, command == "/guest"),
-        _ => Err(Error::Invalid),
+        _ => report(command, value),
     }
+}
+
+fn report(command: &str, value: &str) -> Result<Command> {
+    let report = match command {
+        "/leaderboard" => ReportCommand::Leaderboard {
+            page: optional_page(value)?,
+        },
+        "/gameboard" => return game_leaderboard(value),
+        "/stats" => return player_report(value),
+        "/history" => ReportCommand::History {
+            page: optional_page(value)?,
+        },
+        "/details" => ReportCommand::Session {
+            session: SessionId::new(single_value(value)?)?,
+        },
+        _ => return Err(Error::Invalid),
+    };
+    Ok(Command::Report(report))
+}
+
+fn game_leaderboard(value: &str) -> Result<Command> {
+    let (game, page) = id_and_page(value)?;
+    Ok(Command::Report(ReportCommand::GameLeaderboard {
+        game: GameId::new(game)?,
+        page,
+    }))
+}
+
+fn player_report(value: &str) -> Result<Command> {
+    let (player, page) = id_and_page(value)?;
+    Ok(Command::Report(ReportCommand::Player {
+        player: PlayerId::new(player)?,
+        page,
+    }))
+}
+
+fn id_and_page(value: &str) -> Result<(&str, u32)> {
+    let mut values = value.split_whitespace();
+    let id = values.next().ok_or(Error::Invalid)?;
+    let page = values.next().map(page).transpose()?.unwrap_or(1);
+    if values.next().is_some() {
+        return Err(Error::Invalid);
+    }
+    Ok((id, page))
+}
+
+fn optional_page(value: &str) -> Result<u32> {
+    if value.is_empty() {
+        return Ok(1);
+    }
+    page(single_value(value)?)
+}
+
+fn single_value(value: &str) -> Result<&str> {
+    let mut values = value.split_whitespace();
+    let value = values.next().ok_or(Error::Invalid)?;
+    if values.next().is_some() {
+        return Err(Error::Invalid);
+    }
+    Ok(value)
+}
+
+fn page(value: &str) -> Result<u32> {
+    let page = value.parse().map_err(|_| Error::Invalid)?;
+    if page == 0 {
+        return Err(Error::Invalid);
+    }
+    Ok(page)
 }
 
 pub(super) fn validate_address(update: &AuthorizedUpdate, bot_username: &str) -> Result<()> {

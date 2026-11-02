@@ -28,7 +28,19 @@ The authorization boundary rejects private chats, other groups, channels, anonym
 - Review shows the game, exact played date, selected identities, guest labels, amounts, and total. Confirmation is available only at `S$0.00`; the server independently enforces all domain invariants. “Re-enter amounts” starts amount entry again.
 - `/resume SESSION_ID` restores the current prompt for the draft owner. Start a new `/session` to replace a mistaken game/date/guest selection; historical sessions cannot be edited through this workflow.
 
-Catalog display names may repeat; generated stable IDs distinguish roster entries. Creation stops at 24 active players or 24 games so every accepted entry remains available to new workflow pickers. The application checks capacity before creating the change, and D1 triggers enforce the same limit if requests race. A draft snapshots its game and active-roster choices so button indices remain stable when another administrator creates catalog entries. New catalog entries appear in new drafts. Guests exist only within their own draft/session and never enter ordinary roster pickers. Reporting remains Phase 5.
+Catalog display names may repeat; generated stable IDs distinguish roster entries. Creation stops at 24 active players or 24 games so every accepted entry remains available to new workflow pickers. The application checks capacity before creating the change, and D1 triggers enforce the same limit if requests race. A draft snapshots its game and active-roster choices so button indices remain stable when another administrator creates catalog entries. New catalog entries appear in new drafts. Guests exist only within their own draft/session and never enter ordinary roster pickers.
+
+## Reporting commands
+
+- `/leaderboard [PAGE]` lists the overall permanent-roster ranking.
+- `/gameboard GAME_ID [PAGE]` lists the permanent-roster ranking for one game.
+- `/stats PLAYER_ID [PAGE]` shows one roster player's overall total and dated session results.
+- `/history [PAGE]` lists sessions by exact played date and stable session ID.
+- `/details SESSION_ID` shows one session's game, exact played date, roster entries, and session-scoped guest identities and entries.
+
+Pages default to 1 and contain 10 rows. Page sizes are validated at 1–50 rows inside the reporting boundary, and page numbers are capped at 10,000. Rankings use deterministic total/name/ID ordering; histories use played-date/session-ID ordering. Navigation text supplies the previous or next command when applicable.
+
+All reporting commands pass through the same secret, numeric group, and numeric administrator authorization boundary as mutations. They are read-only and create no Telegram workflow receipt. Leaderboards include permanent roster players only, including roster players with a zero result. Player and ordinary session histories never resolve guest names or amounts; `/details` exposes guests only for the requested session.
 
 ## Persistence and delivery
 
@@ -40,7 +52,7 @@ Replies are sent after database commit. A failed Telegram send produces HTTP 503
 
 ## Resilience and failure handling
 
-The Worker rejects webhook bodies over 16 KiB before JSON decoding. Text commands are limited to 512 bytes, callback data to 64 bytes, callback IDs to 128 bytes, and display names to 64 characters. New workflows snapshot at most 24 games and 24 active players, and a session accepts at most 16 participants. The validated page-size type for Phase 5 reporting permits 1–50 rows.
+The Worker rejects webhook bodies over 16 KiB before JSON decoding. Text commands are limited to 512 bytes, callback data to 64 bytes, callback IDs to 128 bytes, and display names to 64 characters. New workflows snapshot at most 24 games and 24 active players, and a session accepts at most 16 participants. Reporting pages contain 10 rows; the validated reporting types permit 1–50 rows and pages 1–10,000.
 
 [0004](../migrations/0004_telegram_resilience.sql) records verified update keys for a rolling per-administrator limit of 20 new updates per minute. Admission is atomic in D1. Expired events without receipts are pruned; events backed by durable Telegram receipts remain so a delayed replay stays eligible without increasing the current-window count. A new key over the limit is acknowledged without processing or an outbound reply. Secret, numeric chat/user authorization, and command-address validation run before rate admission.
 
@@ -50,6 +62,6 @@ Telegram sends are never retried inline because the API may have accepted a requ
 
 ## Verification and remaining work
 
-[Native tests](../src/telegram/tests.rs) prove unauthorized requests cannot access the repository and cover limits, retry exhaustion/recovery, deadlines, and log redaction. [Local D1 tests](../tests/telegram.test.mjs) compare application tables before and after rejected requests, exercise real HTTP rejection and oversized bodies, throttle by administrator/update key, complete guided flows, preserve full cent precision, race edits/confirmations, inject transaction failures, and replay safely after transport failure or timeout. Outbound sends use an injected transport; real Telegram delivery and staging smoke tests remain unverified.
+[Native tests](../src/telegram/tests.rs) prove unauthorized requests cannot access the repository and cover limits, report parsing, retry exhaustion/recovery, deadlines, and log redaction. [Local D1 tests](../tests/telegram.test.mjs) compare application tables before and after rejected requests, exercise real HTTP rejection and oversized bodies, throttle by administrator/update key, complete guided flows, preserve full cent precision, race edits/confirmations, inject transaction failures, and replay safely after transport failure or timeout. [Reporting tests](../tests/reporting.test.mjs) verify roster-only totals, exact dates, stable pagination, read-only presentation, and session-local guest visibility. Outbound sends use an injected transport; real Telegram delivery and staging smoke tests remain unverified.
 
-Phase 4 is complete locally. Deployment, live Telegram behavior, remote migrations, remote CI, and staging operations remain unverified and separately authorized.
+Phase 5 is complete locally. Deployment, live Telegram behavior, remote migrations, remote CI, and staging operations remain unverified and separately authorized.

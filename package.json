@@ -12,7 +12,7 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --env local",
     "db:migrate:local": "wrangler d1 migrations apply LEDGER_DB --local --env local",
-    "test:d1": "cargo install -q \"worker-build@0.8.7\" --locked && worker-build --release --out-dir build/d1-test --locked --features d1-test && node --test tests/d1.test.mjs tests/telegram.test.mjs"
+    "test:d1": "cargo install -q \"worker-build@0.8.7\" --locked && worker-build --release --out-dir build/d1-test --locked --features d1-test && node --test tests/d1.test.mjs tests/telegram.test.mjs tests/reporting.test.mjs"
   },
   "devDependencies": {
     "wrangler": "4.150.0"

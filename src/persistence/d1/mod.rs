@@ -5,6 +5,7 @@ mod catalog;
 mod confirmation;
 mod drafts;
 mod records;
+mod reporting;
 mod sessions;
 mod sql;
 mod telegram;

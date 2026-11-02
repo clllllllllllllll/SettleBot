@@ -3,7 +3,38 @@ use crate::domain::{
     PlayerId, SessionId,
 };
 
-use super::{DraftState, OwnerId, PersistenceError, PersistentDraft, Revision, UpdateKey};
+use super::{
+    DraftState, OwnerId, PersistenceError, PersistentDraft, ReportPage, ReportPageRequest,
+    Revision, UpdateKey, MAX_REPORT_PAGE_NUMBER, MAX_REPORT_PAGE_SIZE,
+};
+
+#[test]
+fn report_pages_have_bounded_numbers_sizes_and_offsets() {
+    let request = ReportPageRequest::new(3, 10).unwrap();
+    assert_eq!(request.number(), 3);
+    assert_eq!(request.size(), 10);
+    assert_eq!(request.offset(), Ok(20));
+    for (number, size) in [
+        (0, 10),
+        (MAX_REPORT_PAGE_NUMBER + 1, 10),
+        (1, 0),
+        (1, MAX_REPORT_PAGE_SIZE + 1),
+    ] {
+        assert_eq!(
+            ReportPageRequest::new(number, size),
+            Err(PersistenceError::InvalidPage)
+        );
+    }
+}
+
+#[test]
+fn report_pages_trim_the_lookahead_row_without_repeating_it() {
+    let request = ReportPageRequest::new(1, 2).unwrap();
+    let page = ReportPage::from_extra(vec![1, 2, 3], request);
+    assert_eq!(page.items(), &[1, 2]);
+    assert!(page.has_more());
+    assert_eq!(page.number(), 1);
+}
 
 fn session() -> DraftSession {
     DraftSession::new(

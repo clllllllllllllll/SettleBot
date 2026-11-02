@@ -112,6 +112,11 @@ fn text_commands_accept_the_telegram_bot_username_suffix() {
         ("/player@SettleBot Sample Player", "player:Sample Player"),
         ("/game@SettleBot Sample Game", "game:Sample Game"),
         ("/resume@SettleBot t1", "resume:t1"),
+        ("/leaderboard@SettleBot 2", "leaderboard:2"),
+        ("/gameboard@SettleBot poker 3", "gameboard:poker:3"),
+        ("/stats@SettleBot player_one", "stats:player_one:1"),
+        ("/history@SettleBot", "history:1"),
+        ("/details@SettleBot t1", "details:t1"),
         ("/step@SettleBot t1 2 +1.00", "step:t1:2:+1.00"),
         (
             "/guest@SettleBot t1 2 Sample Guest",
@@ -150,6 +155,21 @@ fn command_description(command: &Command) -> String {
         Command::Player(name) => format!("player:{name}"),
         Command::Game(name) => format!("game:{name}"),
         Command::Resume(id) => format!("resume:{}", id.as_str()),
+        Command::Report(super::commands::ReportCommand::Leaderboard { page }) => {
+            format!("leaderboard:{page}")
+        }
+        Command::Report(super::commands::ReportCommand::GameLeaderboard { game, page }) => {
+            format!("gameboard:{}:{page}", game.as_str())
+        }
+        Command::Report(super::commands::ReportCommand::Player { player, page }) => {
+            format!("stats:{}:{page}", player.as_str())
+        }
+        Command::Report(super::commands::ReportCommand::History { page }) => {
+            format!("history:{page}")
+        }
+        Command::Report(super::commands::ReportCommand::Session { session }) => {
+            format!("details:{}", session.as_str())
+        }
         Command::Step {
             id,
             revision,
@@ -445,6 +465,41 @@ impl GameRepository for NoAccess {
         panic!("unauthorized write")
     }
     async fn games(&self) -> PersistenceResult<Vec<Game>> {
+        panic!("unauthorized read")
+    }
+}
+impl crate::persistence::ReportingRepository for NoAccess {
+    async fn leaderboard(
+        &self,
+        _: crate::persistence::ReportPageRequest,
+    ) -> PersistenceResult<crate::persistence::ReportPage<crate::persistence::LeaderboardEntry>>
+    {
+        panic!("unauthorized read")
+    }
+    async fn game_leaderboard(
+        &self,
+        _: &crate::domain::GameId,
+        _: crate::persistence::ReportPageRequest,
+    ) -> PersistenceResult<Option<crate::persistence::GameLeaderboard>> {
+        panic!("unauthorized read")
+    }
+    async fn player_report(
+        &self,
+        _: &crate::domain::PlayerId,
+        _: crate::persistence::ReportPageRequest,
+    ) -> PersistenceResult<Option<crate::persistence::PlayerReport>> {
+        panic!("unauthorized read")
+    }
+    async fn session_history(
+        &self,
+        _: crate::persistence::ReportPageRequest,
+    ) -> PersistenceResult<crate::persistence::ReportPage<crate::persistence::SessionSummary>> {
+        panic!("unauthorized read")
+    }
+    async fn session_detail(
+        &self,
+        _: &crate::domain::SessionId,
+    ) -> PersistenceResult<Option<crate::persistence::SessionDetail>> {
         panic!("unauthorized read")
     }
 }

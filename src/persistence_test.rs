@@ -11,7 +11,7 @@ use crate::domain::{
 use crate::persistence::{
     d1::{D1Repository, DATABASE_BINDING},
     ConfirmCommand, DraftState, Ledger, OwnerId, PersistenceError, PersistenceResult,
-    PersistentDraft, Revision, UpdateKey,
+    PersistentDraft, ReportPage, ReportPageRequest, ReportParticipantIdentity, Revision, UpdateKey,
 };
 
 #[derive(Deserialize)]
@@ -36,6 +36,23 @@ enum Command {
     },
     Confirm(ConfirmationInput),
     Session {
+        id: String,
+    },
+    Leaderboard {
+        game: Option<String>,
+        page: u32,
+        size: usize,
+    },
+    PlayerReport {
+        player: String,
+        page: u32,
+        size: usize,
+    },
+    History {
+        page: u32,
+        size: usize,
+    },
+    Details {
         id: String,
     },
 }
@@ -74,6 +91,14 @@ async fn dispatch(command: Command, ledger: &Ledger<'_, D1Repository>) -> Persis
         Command::Resume { id, owner } => resume(ledger, &id, owner).await,
         Command::Confirm(input) => confirm(ledger, input).await,
         Command::Session { id } => session(ledger, &id).await,
+        Command::Leaderboard { game, page, size } => {
+            leaderboard(ledger, game.as_deref(), page, size).await
+        }
+        Command::PlayerReport { player, page, size } => {
+            player_report(ledger, &player, page, size).await
+        }
+        Command::History { page, size } => history(ledger, page, size).await,
+        Command::Details { id } => details(ledger, &id).await,
     }
 }
 
@@ -283,4 +308,119 @@ async fn session(ledger: &Ledger<'_, D1Repository>, id: &str) -> PersistenceResu
         "occurred_on": session.occurred_on().to_string(), "created_at": session.created_at().to_string(),
         "participants": participant_json(session.participants(), session.entries())}),
     )
+}
+
+async fn leaderboard(
+    ledger: &Ledger<'_, D1Repository>,
+    game: Option<&str>,
+    page: u32,
+    size: usize,
+) -> PersistenceResult<Value> {
+    let request = ReportPageRequest::new(page, size)?;
+    let Some(game) = game else {
+        return Ok(leaderboard_page_json(ledger.leaderboard(request).await?));
+    };
+    let report = ledger
+        .game_leaderboard(&GameId::new(game)?, request)
+        .await?;
+    Ok(report.map_or(Value::Null, |report| {
+        json!({
+            "game": report.game_name.as_str(),
+            "page": leaderboard_page_json(report.page),
+        })
+    }))
+}
+
+fn leaderboard_page_json(page: ReportPage<crate::persistence::LeaderboardEntry>) -> Value {
+    let items: Vec<_> = page
+        .items()
+        .iter()
+        .map(|entry| {
+            json!({
+                "id": entry.player_id.as_str(),
+                "name": entry.player_name.as_str(),
+                "total": entry.total.value().to_string(),
+            })
+        })
+        .collect();
+    page_json(&page, items)
+}
+
+async fn player_report(
+    ledger: &Ledger<'_, D1Repository>,
+    player: &str,
+    page: u32,
+    size: usize,
+) -> PersistenceResult<Value> {
+    let report = ledger
+        .player_report(&PlayerId::new(player)?, ReportPageRequest::new(page, size)?)
+        .await?;
+    Ok(report.map_or(Value::Null, |report| {
+        let sessions: Vec<_> = report
+            .sessions
+            .items()
+            .iter()
+            .map(|row| {
+                json!({
+                    "id": row.session.session_id.as_str(),
+                    "game": row.session.game_name.as_str(),
+                    "occurred_on": row.session.occurred_on.to_string(),
+                    "amount": row.amount.value().to_string(),
+                })
+            })
+            .collect();
+        json!({
+            "id": report.player_id.as_str(),
+            "name": report.player_name.as_str(),
+            "total": report.total.value().to_string(),
+            "sessions": page_json(&report.sessions, sessions),
+        })
+    }))
+}
+
+async fn history(
+    ledger: &Ledger<'_, D1Repository>,
+    page: u32,
+    size: usize,
+) -> PersistenceResult<Value> {
+    let report = ledger
+        .session_history(ReportPageRequest::new(page, size)?)
+        .await?;
+    let sessions: Vec<_> = report.items().iter().map(session_summary_json).collect();
+    Ok(page_json(&report, sessions))
+}
+
+async fn details(ledger: &Ledger<'_, D1Repository>, id: &str) -> PersistenceResult<Value> {
+    let detail = ledger.session_detail(&SessionId::new(id)?).await?;
+    Ok(detail.map_or(Value::Null, |detail| {
+        let entries: Vec<_> = detail
+            .entries
+            .iter()
+            .map(|entry| {
+                let (kind, id) = match &entry.participant {
+                    ReportParticipantIdentity::Roster(id) => ("roster", id.as_str()),
+                    ReportParticipantIdentity::Guest(id) => ("guest", id.as_str()),
+                };
+                json!({
+                    "kind": kind,
+                    "id": id,
+                    "name": entry.display_name.as_str(),
+                    "amount": entry.amount.value().to_string(),
+                })
+            })
+            .collect();
+        json!({"session": session_summary_json(&detail.session), "entries": entries})
+    }))
+}
+
+fn session_summary_json(session: &crate::persistence::SessionSummary) -> Value {
+    json!({
+        "id": session.session_id.as_str(),
+        "game": session.game_name.as_str(),
+        "occurred_on": session.occurred_on.to_string(),
+    })
+}
+
+fn page_json<T>(page: &ReportPage<T>, items: Vec<Value>) -> Value {
+    json!({"number": page.number(), "has_more": page.has_more(), "items": items})
 }

@@ -9,20 +9,20 @@ pub(crate) const MAX_REQUESTS_PER_WINDOW: u32 = 20;
 pub(crate) const RATE_WINDOW_SECONDS: i64 = 60;
 pub(crate) const SAFE_RETRY_ATTEMPTS: usize = 2;
 pub(crate) const TELEGRAM_TIMEOUT_SECONDS: u64 = 5;
-pub const MAX_PAGE_SIZE: u8 = 50;
+pub const MAX_PAGE_SIZE: usize = crate::persistence::MAX_REPORT_PAGE_SIZE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PageSize(u8);
+pub struct PageSize(usize);
 
 impl PageSize {
-    pub fn new(value: u8) -> Result<Self> {
+    pub fn new(value: usize) -> Result<Self> {
         if value == 0 || value > MAX_PAGE_SIZE {
             return Err(Error::Limit);
         }
         Ok(Self(value))
     }
 
-    pub fn value(self) -> u8 {
+    pub fn value(self) -> usize {
         self.0
     }
 }

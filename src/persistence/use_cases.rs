@@ -1,9 +1,10 @@
 use crate::domain::{CreatedAt, Game, Player, SessionId};
 
 use super::{
-    Confirmation, ConfirmationRepository, DraftRepository, DraftState, GameRepository, OwnerId,
-    PersistenceError, PersistenceResult, PersistentDraft, Revision, RosterRepository,
-    SessionRepository, UpdateKey,
+    Confirmation, ConfirmationRepository, DraftRepository, DraftState, GameLeaderboard,
+    GameRepository, LeaderboardEntry, OwnerId, PersistenceError, PersistenceResult,
+    PersistentDraft, PlayerReport, ReportPage, ReportPageRequest, ReportingRepository, Revision,
+    RosterRepository, SessionDetail, SessionRepository, SessionSummary, UpdateKey,
 };
 
 pub struct Ledger<'a, R> {
@@ -76,6 +77,45 @@ impl<R: SessionRepository> Ledger<'_, R> {
         id: &SessionId,
     ) -> PersistenceResult<Option<crate::domain::ConfirmedSession>> {
         self.repository.session(id).await
+    }
+}
+
+impl<R: ReportingRepository> Ledger<'_, R> {
+    pub async fn leaderboard(
+        &self,
+        request: ReportPageRequest,
+    ) -> PersistenceResult<ReportPage<LeaderboardEntry>> {
+        self.repository.leaderboard(request).await
+    }
+
+    pub async fn game_leaderboard(
+        &self,
+        game: &crate::domain::GameId,
+        request: ReportPageRequest,
+    ) -> PersistenceResult<Option<GameLeaderboard>> {
+        self.repository.game_leaderboard(game, request).await
+    }
+
+    pub async fn player_report(
+        &self,
+        player: &crate::domain::PlayerId,
+        request: ReportPageRequest,
+    ) -> PersistenceResult<Option<PlayerReport>> {
+        self.repository.player_report(player, request).await
+    }
+
+    pub async fn session_history(
+        &self,
+        request: ReportPageRequest,
+    ) -> PersistenceResult<ReportPage<SessionSummary>> {
+        self.repository.session_history(request).await
+    }
+
+    pub async fn session_detail(
+        &self,
+        session: &SessionId,
+    ) -> PersistenceResult<Option<SessionDetail>> {
+        self.repository.session_detail(session).await
     }
 }
 

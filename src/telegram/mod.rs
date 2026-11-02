@@ -6,6 +6,7 @@ mod logging;
 pub(crate) mod policy;
 mod rate;
 pub(crate) mod render;
+mod reporting;
 mod resilience;
 mod service;
 mod store;
@@ -47,6 +48,7 @@ impl From<PersistenceError> for Error {
     fn from(error: PersistenceError) -> Self {
         match error {
             PersistenceError::Storage | PersistenceError::Corrupt(_) => Self::Storage,
+            PersistenceError::InvalidPage => Self::Limit,
             _ => Self::Invalid,
         }
     }

@@ -9,6 +9,7 @@ pub enum PersistenceError {
     Invalid(DomainError),
     InvalidOwner,
     InvalidUpdateKey,
+    InvalidPage,
     RevisionOverflow,
     Corrupt(&'static str),
     Storage,

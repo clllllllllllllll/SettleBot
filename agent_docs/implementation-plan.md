@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phases 0–4 are complete locally. The [Worker](../src/lib.rs) has verified request-level health behavior, the platform-independent [domain module](../src/domain/mod.rs) has verified ledger invariants and limits, and the [persistence module](../src/persistence/mod.rs) has verified D1-backed drafts, atomic confirmation, and rate admission. The [Telegram module](../src/telegram/mod.rs) has locally verified authorization, guided workflows, bounded inputs, throttling, timeouts, safe failures, and redacted logs. Phase 4 has not been committed, remotely validated, deployed, or exercised against live Telegram. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks without deployment. Phases 5–7 remain unimplemented and have not started.
+Phases 0–5 are complete locally. The [Worker](../src/lib.rs) has verified request-level health behavior, the platform-independent [domain module](../src/domain/mod.rs) has verified ledger invariants and limits, and the [persistence module](../src/persistence/mod.rs) has verified D1-backed drafts, atomic confirmation, rate admission, and read-only reporting. The [Telegram module](../src/telegram/mod.rs) has locally verified authorization, guided workflows, bounded inputs, throttling, timeouts, safe failures, redacted logs, and reporting presentation. Phase 5 has not been committed, remotely validated, deployed, or exercised against live Telegram. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks without deployment. Phases 6–7 remain unimplemented and have not started.
 
 ## Phase 0 — Foundation
 
@@ -119,6 +119,20 @@ Phase 4's local gate is complete. The changes remain uncommitted and have no rem
 
 - Add roster-only overall and per-game leaderboards, player/session drill-downs, exact occurred-on dates, and bounded pagination. Show guest identities and entries only in the relevant detailed session history.
 - Gate: query and presentation tests prove guests never enter roster rankings or ordinary pickers, unselected players are unchanged, per-game totals are correct, and pagination has deterministic ordering without missing or repeated records for an unchanged dataset.
+
+### Verification evidence
+
+The typed [reporting contract](../src/persistence/reporting.rs), [D1 queries](../src/persistence/d1/reporting.rs), and [Telegram reporting boundary](../src/telegram/reporting.rs) implement this phase over the existing immutable ledger schema. Overall and per-game reports start from the roster, so unselected players retain exact zero results; only session details select guest identities and entries. Pages have validated row and page-number bounds plus complete identity tie-breakers.
+
+Local checks passed on 2026-11-03 with the pinned toolchains:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets -- -D warnings`
+- `cargo test --locked --all-targets` — 65 passed, including typed report-page boundary tests and all prior domain, persistence, Telegram, and request tests.
+- `pnpm test:d1` — 34 passed (13 persistence, 18 Telegram workflow/resilience, and 3 isolated reporting cases) after applying all four migrations to empty local D1 databases. The reporting fixture verifies roster-only overall and per-game totals, widened aggregation across `[i64::MAX, 1, -i64::MAX]`, a zero-result unselected player, exact player/session dates, detail-only guest visibility, read-only Telegram presentation, and deterministic two-page traversal without gaps or repeats. Player totals and histories are read in one transactional batch.
+- `pnpm build` — release WebAssembly build and Wrangler deployment dry run succeeded; no deployment was performed.
+
+Phase 5's local gate is complete. The changes remain uncommitted and have no remote CI run. No live Telegram call, remote D1 migration, secret change, cloud resource, or deployment was used.
 
 ## Phase 6 — Audit and recovery
 

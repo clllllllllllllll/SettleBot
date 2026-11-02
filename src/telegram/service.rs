@@ -23,7 +23,12 @@ pub(crate) async fn handle<R: Repository, C: Clock>(
 ) -> Result<Reply> {
     config.check_secret(secret)?;
     let update = decode(config, body)?;
-    let command = parse(&update, config.bot_username())?;
+    let command = match parse(&update, config.bot_username())? {
+        Command::Report(report) => {
+            return super::reporting::reply(repository, update.chat, report).await
+        }
+        command => command,
+    };
     if let Some(reply) = replay(repository, &update).await? {
         return Ok(reply);
     }
@@ -90,6 +95,7 @@ async fn prepare<R: Repository, C: Clock>(
             change(flow, clock)
         }
         Command::Resume(_) => Err(Error::Invalid),
+        Command::Report(_) => Err(Error::Invalid),
     }
 }
 
