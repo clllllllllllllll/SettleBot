@@ -59,6 +59,32 @@ async function saveAndConfirm(id, game, occurred_on, participants) {
   });
 }
 
+async function seedBatchedBoundaryHistory() {
+  await commandSuccess({ operation: "add_player", id: "batched", name: "Batched Player" });
+  const amount = "CASE n WHEN 0 THEN 9223372036854775807 WHEN 100 THEN 1 WHEN 101 THEN -9223372036854775807 ELSE 0 END";
+  const counterAmount = "CASE n WHEN 0 THEN -9223372036854775807 WHEN 100 THEN -1 WHEN 101 THEN 9223372036854775807 ELSE 0 END";
+  const sequence = "WITH RECURSIVE numbers(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM numbers WHERE n < 101)";
+  await database.batch([
+    database.prepare(`${sequence}
+      INSERT INTO drafts (id, owner_id, game_id, occurred_on, revision, state)
+      SELECT printf('batch_%03d', n), '100', 'poker', '2026-08-01', 1, 'consumed' FROM numbers`),
+    database.prepare(`${sequence}
+      INSERT INTO sessions (id, owner_id, game_id, occurred_on, created_at)
+      SELECT printf('batch_%03d', n), '100', 'poker', '2026-08-01', '${created}' FROM numbers`),
+    database.prepare(`${sequence}
+      INSERT INTO session_entries
+        (session_id, kind, identity_id, roster_player_id, guest_name, position, amount_cents)
+      SELECT printf('batch_%03d', n), 'roster', 'batched', 'batched', NULL, 0, ${amount}
+      FROM numbers`),
+    database.prepare(`${sequence}
+      INSERT INTO session_entries
+        (session_id, kind, identity_id, roster_player_id, guest_name, position, amount_cents)
+      SELECT printf('batch_%03d', n), 'guest', 'counterparty', NULL, 'Sample Guest', 1,
+             ${counterAmount}
+      FROM numbers`),
+  ]);
+}
+
 function message(text, owner = 100) {
   return {
     update_id: sequence++,
@@ -155,6 +181,38 @@ test("report totals avoid SQLite intermediate integer overflow", async () => {
   assert.deepEqual(player.sessions.items.map(row => row.amount), [
     "9223372036854775807", "1", "-9223372036854775807",
   ]);
+});
+
+test("report aggregation spans bounded batches and keeps one snapshot", async () => {
+  await seedBatchedBoundaryHistory();
+
+  const overall = await commandSuccess({ operation: "leaderboard", game: null, page: 1, size: 50 });
+  const poker = await commandSuccess({ operation: "leaderboard", game: "poker", page: 1, size: 50 });
+  const player = await commandSuccess({ operation: "player_report", player: "batched", page: 1, size: 50 });
+  assert.equal(overall.items.find(row => row.id === "batched").total, "1");
+  assert.equal(poker.page.items.find(row => row.id === "batched").total, "1");
+  assert.equal(player.total, "1");
+  assert.equal(player.sessions.items.length, 50);
+  assert.equal(player.sessions.has_more, true);
+
+  const snapshot = await commandSuccess({ operation: "report_snapshot" });
+  await saveAndConfirm("snapshot_append", "poker", "2026-10-04", [
+    { kind: "roster", id: "batched", amount: "500" },
+    { kind: "guest", id: "counterparty", name: "Sample Guest", amount: "-500" },
+  ]);
+  const fixed = await commandSuccess({
+    operation: "player_report_at_snapshot",
+    player: "batched",
+    page: 1,
+    size: 50,
+    max_session_rowid: snapshot.max_session_rowid,
+  });
+  assert.equal(fixed.total, "1");
+  assert.ok(!fixed.sessions.items.some(row => row.id === "snapshot_append"));
+
+  const current = await commandSuccess({ operation: "player_report", player: "batched", page: 1, size: 50 });
+  assert.equal(current.total, "501");
+  assert.equal(current.sessions.items[0].id, "snapshot_append");
 });
 
 test("authorized Telegram reports show exact dates and confine guest details", async () => {

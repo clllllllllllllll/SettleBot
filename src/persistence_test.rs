@@ -48,6 +48,13 @@ enum Command {
         page: u32,
         size: usize,
     },
+    ReportSnapshot,
+    PlayerReportAtSnapshot {
+        player: String,
+        page: u32,
+        size: usize,
+        max_session_rowid: String,
+    },
     History {
         page: u32,
         size: usize,
@@ -76,29 +83,48 @@ async fn execute(input: &str, environment: Env) -> PersistenceResult<Value> {
         .d1(DATABASE_BINDING)
         .map_err(|_| PersistenceError::Storage)?;
     let repository = D1Repository::new(database);
-    dispatch(command, &Ledger::new(&repository)).await
+    dispatch(command, &repository).await
 }
 
-async fn dispatch(command: Command, ledger: &Ledger<'_, D1Repository>) -> PersistenceResult<Value> {
+async fn dispatch(command: Command, repository: &D1Repository) -> PersistenceResult<Value> {
+    let ledger = Ledger::new(repository);
     match command {
-        Command::AddPlayer { id, name } => add_player(ledger, &id, &name).await,
-        Command::AddGame { id, name } => add_game(ledger, &id, &name).await,
-        Command::Catalog => catalog(ledger).await,
+        Command::AddPlayer { id, name } => add_player(&ledger, &id, &name).await,
+        Command::AddGame { id, name } => add_game(&ledger, &id, &name).await,
+        Command::Catalog => catalog(&ledger).await,
         Command::SaveDraft {
             draft,
             expected_revision,
-        } => save_draft(ledger, draft, expected_revision).await,
-        Command::Resume { id, owner } => resume(ledger, &id, owner).await,
-        Command::Confirm(input) => confirm(ledger, input).await,
-        Command::Session { id } => session(ledger, &id).await,
+        } => save_draft(&ledger, draft, expected_revision).await,
+        Command::Resume { id, owner } => resume(&ledger, &id, owner).await,
+        Command::Confirm(input) => confirm(&ledger, input).await,
+        Command::Session { id } => session(&ledger, &id).await,
         Command::Leaderboard { game, page, size } => {
-            leaderboard(ledger, game.as_deref(), page, size).await
+            leaderboard(&ledger, game.as_deref(), page, size).await
         }
         Command::PlayerReport { player, page, size } => {
-            player_report(ledger, &player, page, size).await
+            player_report(&ledger, &player, page, size).await
         }
-        Command::History { page, size } => history(ledger, page, size).await,
-        Command::Details { id } => details(ledger, &id).await,
+        Command::ReportSnapshot => Ok(json!({
+            "max_session_rowid": repository.report_snapshot_for_test().await?
+        })),
+        Command::PlayerReportAtSnapshot {
+            player,
+            page,
+            size,
+            max_session_rowid,
+        } => {
+            let report = repository
+                .player_report_at_snapshot_for_test(
+                    &PlayerId::new(&player)?,
+                    ReportPageRequest::new(page, size)?,
+                    &max_session_rowid,
+                )
+                .await?;
+            Ok(report.map_or(Value::Null, player_report_json))
+        }
+        Command::History { page, size } => history(&ledger, page, size).await,
+        Command::Details { id } => details(&ledger, &id).await,
     }
 }
 
@@ -355,27 +381,29 @@ async fn player_report(
     let report = ledger
         .player_report(&PlayerId::new(player)?, ReportPageRequest::new(page, size)?)
         .await?;
-    Ok(report.map_or(Value::Null, |report| {
-        let sessions: Vec<_> = report
-            .sessions
-            .items()
-            .iter()
-            .map(|row| {
-                json!({
-                    "id": row.session.session_id.as_str(),
-                    "game": row.session.game_name.as_str(),
-                    "occurred_on": row.session.occurred_on.to_string(),
-                    "amount": row.amount.value().to_string(),
-                })
+    Ok(report.map_or(Value::Null, player_report_json))
+}
+
+fn player_report_json(report: crate::persistence::PlayerReport) -> Value {
+    let sessions: Vec<_> = report
+        .sessions
+        .items()
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.session.session_id.as_str(),
+                "game": row.session.game_name.as_str(),
+                "occurred_on": row.session.occurred_on.to_string(),
+                "amount": row.amount.value().to_string(),
             })
-            .collect();
-        json!({
-            "id": report.player_id.as_str(),
-            "name": report.player_name.as_str(),
-            "total": report.total.value().to_string(),
-            "sessions": page_json(&report.sessions, sessions),
         })
-    }))
+        .collect();
+    json!({
+        "id": report.player_id.as_str(),
+        "name": report.player_name.as_str(),
+        "total": report.total.value().to_string(),
+        "sessions": page_json(&report.sessions, sessions),
+    })
 }
 
 async fn history(

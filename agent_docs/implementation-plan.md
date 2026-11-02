@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phases 0–5 are complete locally. The [Worker](../src/lib.rs) has verified request-level health behavior, the platform-independent [domain module](../src/domain/mod.rs) has verified ledger invariants and limits, and the [persistence module](../src/persistence/mod.rs) has verified D1-backed drafts, atomic confirmation, rate admission, and read-only reporting. The [Telegram module](../src/telegram/mod.rs) has locally verified authorization, guided workflows, bounded inputs, throttling, timeouts, safe failures, redacted logs, and reporting presentation. Phase 5 has not been committed, remotely validated, deployed, or exercised against live Telegram. The [CI workflow](../.github/workflows/ci.yml) runs formatting, linting, native tests, local D1 integration tests, and build checks without deployment. Phases 6–7 remain unimplemented and have not started.
+Phases 0–5 are implemented and verified locally. Their implementation commits are on `main` and passed the validation-only [CI workflow](../.github/workflows/ci.yml), which runs formatting, linting, native tests, local D1/workerd integration tests, and a production Worker build without deployment. The [Worker](../src/lib.rs), platform-independent [domain module](../src/domain/mod.rs), [persistence module](../src/persistence/mod.rs), and [Telegram module](../src/telegram/mod.rs) have verified local behavior through Phase 5. This evidence does not verify remote D1, a deployed Worker, staging or production configuration, or live Telegram. The reporting batching remediation after the Phase 5 implementation commit is verified locally only and still requires a commit and successful CI run for remote validation. Phases 6–7 remain explicitly outstanding; the next authorized implementation gate is Phase 6 audit and recovery, not production delivery.
 
 ## Phase 0 — Foundation
 
@@ -91,7 +91,7 @@ Local checks passed on 2026-11-02 with the pinned toolchains:
 - `pnpm test:d1` — the full suite builds the feature-gated Rust test Worker and applies all three migrations to empty local D1 databases. Final integration execution: 28 passed (13 persistence and 15 Telegram cases). Tests exercise the real HTTP adapter's rejection path, zero-write rejection, owner/revision/state guards, complete review/confirmation, roster-only pickers, guest isolation, concurrent same/different update IDs, rollback at the final receipt, retry after send failure, and full cent precision.
 - `pnpm build` — release WebAssembly build and deployment dry run succeeded; no production bindings configured. Normal output excludes both test RPC exports.
 
-Phase 3's documented local gate is complete in implementation commit `ef42b88`. There is no recorded Phase 3-specific remote CI run. Outbound Telegram delivery was tested with an injected transport; no live bot, webhook, remote D1 database, or deployment was used.
+Phase 3's gate is complete in implementation commit [`ef42b88a3ee5e18c6ffe3145df7a00bccc0162ea`](https://github.com/clllllllllllllll/SettleBot/commit/ef42b88a3ee5e18c6ffe3145df7a00bccc0162ea). Its formatting, Clippy, native tests, real local D1/workerd tests, and production Worker build passed in [GitHub Actions run `41462136749`](https://github.com/clllllllllllllll/SettleBot/actions/runs/41462136749). Outbound Telegram delivery used an injected transport; no live bot, webhook, remote D1 database, migration, or deployment was used.
 
 ## Phase 4 — Resilience
 
@@ -113,7 +113,7 @@ Local checks passed on 2026-11-02 with the pinned toolchains:
 - `pnpm test:d1` — 31 passed (13 persistence and 18 Telegram cases) after applying all four migrations to empty local D1 databases. New cases cover oversized inputs, catalog capacity and concurrent creation, atomic per-user throttling, delayed duplicate-key admission, rolling-window recovery, and timeout replay without duplicate ledger writes. Existing authorization, concurrency, and transaction rollback cases remain green.
 - `pnpm build` — release WebAssembly build and Wrangler deployment dry run succeeded; no deployment was performed.
 
-Phase 4's local gate is complete. The changes remain uncommitted and have no remote CI run. No live Telegram call, remote D1 migration, secret change, cloud resource, or deployment was used.
+Phase 4's gate is complete in implementation commit [`f830bc4641958e22e59bea1993d3664d48a985e4`](https://github.com/clllllllllllllll/SettleBot/commit/f830bc4641958e22e59bea1993d3664d48a985e4). Its formatting, Clippy, native tests, real local D1/workerd tests, and production Worker build passed in [GitHub Actions run `41476300605`](https://github.com/clllllllllllllll/SettleBot/actions/runs/41476300605). No live Telegram call, remote D1 migration, secret change, cloud resource, or deployment was used.
 
 ## Phase 5 — Reporting
 
@@ -129,15 +129,19 @@ Local checks passed on 2026-11-03 with the pinned toolchains:
 - `cargo fmt --all -- --check`
 - `cargo clippy --locked --all-targets -- -D warnings`
 - `cargo test --locked --all-targets` — 65 passed, including typed report-page boundary tests and all prior domain, persistence, Telegram, and request tests.
-- `pnpm test:d1` — 34 passed (13 persistence, 18 Telegram workflow/resilience, and 3 isolated reporting cases) after applying all four migrations to empty local D1 databases. The reporting fixture verifies roster-only overall and per-game totals, widened aggregation across `[i64::MAX, 1, -i64::MAX]`, a zero-result unselected player, exact player/session dates, detail-only guest visibility, read-only Telegram presentation, and deterministic two-page traversal without gaps or repeats. Player totals and histories are read in one transactional batch.
+- `pnpm test:d1` — 34 passed (13 persistence, 18 Telegram workflow/resilience, and 3 isolated reporting cases) after applying all four migrations to empty local D1 databases. The reporting fixture verifies roster-only overall and per-game totals, widened aggregation across `[i64::MAX, 1, -i64::MAX]`, a zero-result unselected player, exact player/session dates, detail-only guest visibility, read-only Telegram presentation, and deterministic two-page traversal without gaps or repeats.
 - `pnpm build` — release WebAssembly build and Wrangler deployment dry run succeeded; no deployment was performed.
 
-Phase 5's local gate is complete. The changes remain uncommitted and have no remote CI run. No live Telegram call, remote D1 migration, secret change, cloud resource, or deployment was used.
+Phase 5's gate is complete in implementation commit [`53e6deae16dd89caabdba95a1d23ca50def771c3`](https://github.com/clllllllllllllll/SettleBot/commit/53e6deae16dd89caabdba95a1d23ca50def771c3). Its formatting, Clippy, native tests, 34 real local D1/workerd tests, and production Worker build passed in [GitHub Actions run `41482729510`](https://github.com/clllllllllllllll/SettleBot/actions/runs/41482729510).
+
+The 2026-11-03 reporting remediation bounds contribution reads to deterministic 100-row keyset batches and accumulates only exact checked `i128` totals in Worker memory. A session-row boundary captured with each report's roster or player page excludes later appends from subsequent batches, preserving one logical report snapshot under the current immutable ledger model. Focused local D1 coverage spans multiple internal batches, numeric boundaries, pagination, and an append after the captured boundary. Local remediation validation passes 65 native tests, 35 real local D1/workerd tests, and the production Worker dry run. The remediation working tree has no remote CI evidence yet. No live Telegram call, remote D1 migration, secret change, cloud resource, or deployment was used.
 
 ## Phase 6 — Audit and recovery
 
 - Implement authorized corrections through audited revisions or voids; preserve original records. Add CSV or JSON export, backups, and documented recovery procedures.
 - Gate: tests verify audit lineage and corrected aggregates without silently rewriting history. Restore a backup into an isolated test database and verify record counts, ledger totals, and audit history. Document the tested recovery and migration procedures.
+
+This is the next authorized phase. It must define how correction/void records interact with the immutable reporting snapshot boundary before changing the schema or aggregation model. Completion requires tested audit lineage, export, isolated backup restore, recovery verification, and concise operational documentation; none exists yet.
 
 ## Phase 7 — Delivery and operations
 
@@ -145,3 +149,5 @@ Phase 5's local gate is complete. The changes remain uncommitted and have no rem
 - Run staging smoke tests; require explicit manual approval before production promotion of that same commit SHA. Verify the promoted SHA has successful staging evidence and cannot silently resolve to a newer branch head.
 - Control migrations separately with backward-compatible changes and a tested recovery path. Add monitoring, operational alerts, and Worker rollback procedures that explicitly do not restore D1 schema or data.
 - Gate: after explicit authorization for external setup/deployment, verify a PR cannot deploy, a failed `main` validation cannot deploy, staging failure blocks promotion, and production requires approval for the smoke-tested SHA. Record deployment/smoke evidence and a tested rollback/recovery exercise without secrets or private data.
+
+Phase 7 has not started. The current validation-only workflow, successful CI history, and local dry runs do not establish staging, production promotion, rollback, monitoring, remote migration safety, or production readiness.

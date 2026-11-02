@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use serde::{de::DeserializeOwned, Deserialize};
 use worker::{D1Result, D1Type::Text};
@@ -14,22 +14,37 @@ use super::{decode_rows, records::corrupt, D1Repository};
 
 const REPORT_ROSTER: &str = "
     SELECT id AS player_id, display_name AS player_name FROM players ORDER BY id";
+const REPORT_SNAPSHOT: &str = "
+    SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT) AS max_session_rowid FROM sessions";
 const OVERALL_CONTRIBUTIONS: &str = "
-    SELECT roster_player_id AS player_id, CAST(amount_cents AS TEXT) AS amount_cents
-    FROM session_entries WHERE roster_player_id IS NOT NULL
-    ORDER BY roster_player_id, session_id";
-const GAME: &str = "SELECT display_name FROM games WHERE id = ?";
-const GAME_CONTRIBUTIONS: &str = "
-    SELECT entries.roster_player_id AS player_id,
+    SELECT entries.roster_player_id AS player_id, entries.session_id,
            CAST(entries.amount_cents AS TEXT) AS amount_cents
     FROM session_entries AS entries JOIN sessions ON sessions.id = entries.session_id
-    WHERE entries.roster_player_id IS NOT NULL AND sessions.game_id = ?
-    ORDER BY entries.roster_player_id, entries.session_id";
+    WHERE entries.roster_player_id IS NOT NULL
+      AND sessions.rowid <= CAST(?1 AS INTEGER)
+      AND (entries.roster_player_id > ?2
+           OR (entries.roster_player_id = ?2 AND entries.session_id > ?3))
+    ORDER BY entries.roster_player_id, entries.session_id
+    LIMIT CAST(?4 AS INTEGER)";
+const GAME: &str = "SELECT display_name FROM games WHERE id = ?";
+const GAME_CONTRIBUTIONS: &str = "
+    SELECT entries.roster_player_id AS player_id, entries.session_id,
+           CAST(entries.amount_cents AS TEXT) AS amount_cents
+    FROM session_entries AS entries JOIN sessions ON sessions.id = entries.session_id
+    WHERE entries.roster_player_id IS NOT NULL AND sessions.game_id = ?1
+      AND sessions.rowid <= CAST(?2 AS INTEGER)
+      AND (entries.roster_player_id > ?3
+           OR (entries.roster_player_id = ?3 AND entries.session_id > ?4))
+    ORDER BY entries.roster_player_id, entries.session_id
+    LIMIT CAST(?5 AS INTEGER)";
 const PLAYER: &str = "
     SELECT id AS player_id, display_name AS player_name FROM players WHERE id = ?";
 const PLAYER_CONTRIBUTIONS: &str = "
-    SELECT CAST(amount_cents AS TEXT) AS amount_cents
-    FROM session_entries WHERE roster_player_id = ? ORDER BY session_id";
+    SELECT entries.session_id, CAST(entries.amount_cents AS TEXT) AS amount_cents
+    FROM session_entries AS entries JOIN sessions ON sessions.id = entries.session_id
+    WHERE entries.roster_player_id = ?1
+      AND sessions.rowid <= CAST(?2 AS INTEGER) AND entries.session_id > ?3
+    ORDER BY entries.session_id LIMIT CAST(?4 AS INTEGER)";
 const PLAYER_SESSIONS: &str = "
     SELECT sessions.id AS session_id, games.display_name AS game_name,
            sessions.occurred_on, CAST(entries.amount_cents AS TEXT) AS amount_cents
@@ -37,8 +52,19 @@ const PLAYER_SESSIONS: &str = "
     JOIN sessions ON sessions.id = entries.session_id
     JOIN games ON games.id = sessions.game_id
     WHERE entries.roster_player_id = ?1
+      AND sessions.rowid <= (SELECT COALESCE(MAX(rowid), 0) FROM sessions)
     ORDER BY sessions.occurred_on DESC, sessions.id DESC
     LIMIT CAST(?2 AS INTEGER) OFFSET CAST(?3 AS INTEGER)";
+#[cfg(feature = "d1-test")]
+const PLAYER_SESSIONS_AT_SNAPSHOT: &str = "
+    SELECT sessions.id AS session_id, games.display_name AS game_name,
+           sessions.occurred_on, CAST(entries.amount_cents AS TEXT) AS amount_cents
+    FROM session_entries AS entries
+    JOIN sessions ON sessions.id = entries.session_id
+    JOIN games ON games.id = sessions.game_id
+    WHERE entries.roster_player_id = ?1 AND sessions.rowid <= CAST(?2 AS INTEGER)
+    ORDER BY sessions.occurred_on DESC, sessions.id DESC
+    LIMIT CAST(?3 AS INTEGER) OFFSET CAST(?4 AS INTEGER)";
 const SESSION_HISTORY: &str = "
     SELECT sessions.id AS session_id, games.display_name AS game_name, sessions.occurred_on
     FROM sessions JOIN games ON games.id = sessions.game_id
@@ -55,6 +81,8 @@ const SESSION_DETAIL_ENTRIES: &str = "
     FROM session_entries AS entries
     LEFT JOIN players ON players.id = entries.roster_player_id
     WHERE entries.session_id = ? ORDER BY entries.position";
+
+const REPORT_CONTRIBUTION_BATCH_SIZE: usize = 100;
 
 #[derive(Deserialize)]
 struct RosterRow {
@@ -74,11 +102,12 @@ impl RosterRow {
 #[derive(Deserialize)]
 struct ContributionRow {
     player_id: String,
+    session_id: String,
     amount_cents: String,
 }
 
 impl ContributionRow {
-    fn decode(self) -> PersistenceResult<(PlayerId, Cents)> {
+    fn decode(&self) -> PersistenceResult<(PlayerId, Cents)> {
         Ok((
             PlayerId::new(&self.player_id)?,
             decode_cents(&self.amount_cents)?,
@@ -88,7 +117,65 @@ impl ContributionRow {
 
 #[derive(Deserialize)]
 struct AmountRow {
+    session_id: String,
     amount_cents: String,
+}
+
+#[derive(Deserialize)]
+struct SnapshotRow {
+    max_session_rowid: String,
+}
+
+#[derive(Clone)]
+struct ReportSnapshot(String);
+
+impl ReportSnapshot {
+    fn decode(row: SnapshotRow) -> PersistenceResult<Self> {
+        let value = row
+            .max_session_rowid
+            .parse::<i64>()
+            .map_err(|_| PersistenceError::Corrupt("report snapshot"))?;
+        if value < 0 {
+            return Err(PersistenceError::Corrupt("report snapshot"));
+        }
+        Ok(Self(row.max_session_rowid))
+    }
+
+    #[cfg(feature = "d1-test")]
+    fn from_text(value: &str) -> PersistenceResult<Self> {
+        Self::decode(SnapshotRow {
+            max_session_rowid: value.to_owned(),
+        })
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Default)]
+struct WideTotal(i128);
+
+impl WideTotal {
+    fn add(&mut self, amount: Cents) -> PersistenceResult<()> {
+        self.0 = self
+            .0
+            .checked_add(i128::from(amount.value()))
+            .ok_or(PersistenceError::Corrupt("report aggregate overflow"))?;
+        Ok(())
+    }
+
+    fn cents(self) -> PersistenceResult<Cents> {
+        i64::try_from(self.0)
+            .map(Cents::new)
+            .map_err(|_| PersistenceError::Corrupt("report aggregate overflow"))
+    }
+}
+
+#[derive(Default)]
+struct ContributionCursor {
+    player_id: String,
+    session_id: String,
 }
 
 #[derive(Deserialize)]
@@ -168,14 +255,9 @@ impl ReportingRepository for D1Repository {
         &self,
         request: ReportPageRequest,
     ) -> PersistenceResult<ReportPage<LeaderboardEntry>> {
-        let statements = vec![
-            self.statement(REPORT_ROSTER, &[])?,
-            self.statement(OVERALL_CONTRIBUTIONS, &[])?,
-        ];
-        let mut results = self.batch(statements).await?.into_iter();
-        let roster = next_rows::<RosterRow>(&mut results, "report roster query")?;
-        let contributions = next_rows(&mut results, "report contribution query")?;
-        leaderboard_page(roster, contributions, request)
+        let (roster, snapshot) = self.leaderboard_snapshot().await?;
+        let totals = self.overall_totals(&roster, &snapshot).await?;
+        leaderboard_page(roster, totals, request)
     }
 
     async fn game_leaderboard(
@@ -189,10 +271,11 @@ impl ReportingRepository for D1Repository {
             return Ok(None);
         };
         let roster = next_rows::<RosterRow>(&mut results, "game report roster query")?;
-        let contributions = next_rows(&mut results, "game contribution query")?;
+        let snapshot = next_snapshot(&mut results)?;
+        let totals = self.game_totals(game, &roster, &snapshot).await?;
         Ok(Some(GameLeaderboard {
             game_name,
-            page: leaderboard_page(roster, contributions, request)?,
+            page: leaderboard_page(roster, totals, request)?,
         }))
     }
 
@@ -201,10 +284,13 @@ impl ReportingRepository for D1Repository {
         player: &PlayerId,
         request: ReportPageRequest,
     ) -> PersistenceResult<Option<PlayerReport>> {
-        // D1 executes the header, contributions, and history in one transactional batch.
+        // D1 captures the player header, read boundary, and history in one snapshot.
         let statements = self.player_report_statements(player, request)?;
         let results = self.batch(statements).await?;
-        decode_player_report(results, request)
+        let Some(head) = decode_player_report_head(results, request)? else {
+            return Ok(None);
+        };
+        self.finish_player_report(player, head).await.map(Some)
     }
 
     async fn session_history(
@@ -235,6 +321,16 @@ impl ReportingRepository for D1Repository {
 }
 
 impl D1Repository {
+    async fn leaderboard_snapshot(&self) -> PersistenceResult<(Vec<RosterRow>, ReportSnapshot)> {
+        let statements = vec![
+            self.statement(REPORT_ROSTER, &[])?,
+            self.statement(REPORT_SNAPSHOT, &[])?,
+        ];
+        let mut results = self.batch(statements).await?.into_iter();
+        let roster = next_rows(&mut results, "report roster query")?;
+        Ok((roster, next_snapshot(&mut results)?))
+    }
+
     fn game_report_statements(
         &self,
         game: &GameId,
@@ -242,7 +338,7 @@ impl D1Repository {
         Ok(vec![
             self.statement(GAME, &[Text(game.as_str())])?,
             self.statement(REPORT_ROSTER, &[])?,
-            self.statement(GAME_CONTRIBUTIONS, &[Text(game.as_str())])?,
+            self.statement(REPORT_SNAPSHOT, &[])?,
         ])
     }
 
@@ -254,10 +350,133 @@ impl D1Repository {
         let (limit, offset) = page_values(request)?;
         Ok(vec![
             self.statement(PLAYER, &[Text(player.as_str())])?,
-            self.statement(PLAYER_CONTRIBUTIONS, &[Text(player.as_str())])?,
+            self.statement(REPORT_SNAPSHOT, &[])?,
             self.statement(
                 PLAYER_SESSIONS,
                 &[Text(player.as_str()), Text(&limit), Text(&offset)],
+            )?,
+        ])
+    }
+
+    async fn overall_totals(
+        &self,
+        roster: &[RosterRow],
+        snapshot: &ReportSnapshot,
+    ) -> PersistenceResult<BTreeMap<PlayerId, WideTotal>> {
+        let mut totals = empty_totals(roster)?;
+        let mut cursor = ContributionCursor::default();
+        loop {
+            let rows = self.overall_contribution_batch(snapshot, &cursor).await?;
+            if add_contribution_batch(&mut totals, &mut cursor, rows)? {
+                return Ok(totals);
+            }
+        }
+    }
+
+    async fn game_totals(
+        &self,
+        game: &GameId,
+        roster: &[RosterRow],
+        snapshot: &ReportSnapshot,
+    ) -> PersistenceResult<BTreeMap<PlayerId, WideTotal>> {
+        let mut totals = empty_totals(roster)?;
+        let mut cursor = ContributionCursor::default();
+        loop {
+            let rows = self
+                .game_contribution_batch(game, snapshot, &cursor)
+                .await?;
+            if add_contribution_batch(&mut totals, &mut cursor, rows)? {
+                return Ok(totals);
+            }
+        }
+    }
+
+    async fn player_total(
+        &self,
+        player: &PlayerId,
+        snapshot: &ReportSnapshot,
+    ) -> PersistenceResult<Cents> {
+        let mut total = WideTotal::default();
+        let mut cursor = String::new();
+        loop {
+            let rows = self
+                .player_contribution_batch(player, snapshot, &cursor)
+                .await?;
+            if add_amount_batch(&mut total, &mut cursor, rows)? {
+                return total.cents();
+            }
+        }
+    }
+
+    async fn finish_player_report(
+        &self,
+        player: &PlayerId,
+        head: PlayerReportHead,
+    ) -> PersistenceResult<PlayerReport> {
+        Ok(PlayerReport {
+            player_id: head.player_id,
+            player_name: head.player_name,
+            total: self.player_total(player, &head.snapshot).await?,
+            sessions: head.sessions,
+        })
+    }
+
+    #[cfg(feature = "d1-test")]
+    pub(crate) async fn report_snapshot_for_test(&self) -> PersistenceResult<String> {
+        let rows = self.rows::<SnapshotRow>(REPORT_SNAPSHOT, &[]).await?;
+        let row = rows
+            .into_iter()
+            .next()
+            .ok_or(PersistenceError::Corrupt("report snapshot"))?;
+        Ok(ReportSnapshot::decode(row)?.0)
+    }
+
+    #[cfg(feature = "d1-test")]
+    pub(crate) async fn player_report_at_snapshot_for_test(
+        &self,
+        player: &PlayerId,
+        request: ReportPageRequest,
+        snapshot: &str,
+    ) -> PersistenceResult<Option<PlayerReport>> {
+        let snapshot = ReportSnapshot::from_text(snapshot)?;
+        let head = self
+            .player_report_head_at_snapshot(player, request, snapshot)
+            .await?;
+        match head {
+            Some(head) => self.finish_player_report(player, head).await.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    #[cfg(feature = "d1-test")]
+    async fn player_report_head_at_snapshot(
+        &self,
+        player: &PlayerId,
+        request: ReportPageRequest,
+        snapshot: ReportSnapshot,
+    ) -> PersistenceResult<Option<PlayerReportHead>> {
+        let statements = self.player_report_at_snapshot_statements(player, request, &snapshot)?;
+        decode_player_report_at_snapshot(self.batch(statements).await?, request, snapshot)
+    }
+
+    #[cfg(feature = "d1-test")]
+    fn player_report_at_snapshot_statements(
+        &self,
+        player: &PlayerId,
+        request: ReportPageRequest,
+        snapshot: &ReportSnapshot,
+    ) -> PersistenceResult<Vec<worker::D1PreparedStatement>> {
+        let (limit, offset) = page_values(request)?;
+        Ok(vec![
+            self.statement(PLAYER, &[Text(player.as_str())])?,
+            self.statement(
+                PLAYER_SESSIONS_AT_SNAPSHOT,
+                &[
+                    Text(player.as_str()),
+                    Text(snapshot.as_str()),
+                    Text(&limit),
+                    Text(&offset),
+                ],
             )?,
         ])
     }
@@ -285,6 +504,63 @@ impl D1Repository {
             .map(|row| row.decode(session).map_err(corrupt))
             .collect()
     }
+
+    async fn overall_contribution_batch(
+        &self,
+        snapshot: &ReportSnapshot,
+        cursor: &ContributionCursor,
+    ) -> PersistenceResult<Vec<ContributionRow>> {
+        let limit = REPORT_CONTRIBUTION_BATCH_SIZE.to_string();
+        self.rows(
+            OVERALL_CONTRIBUTIONS,
+            &[
+                Text(snapshot.as_str()),
+                Text(&cursor.player_id),
+                Text(&cursor.session_id),
+                Text(&limit),
+            ],
+        )
+        .await
+    }
+
+    async fn game_contribution_batch(
+        &self,
+        game: &GameId,
+        snapshot: &ReportSnapshot,
+        cursor: &ContributionCursor,
+    ) -> PersistenceResult<Vec<ContributionRow>> {
+        let limit = REPORT_CONTRIBUTION_BATCH_SIZE.to_string();
+        self.rows(
+            GAME_CONTRIBUTIONS,
+            &[
+                Text(game.as_str()),
+                Text(snapshot.as_str()),
+                Text(&cursor.player_id),
+                Text(&cursor.session_id),
+                Text(&limit),
+            ],
+        )
+        .await
+    }
+
+    async fn player_contribution_batch(
+        &self,
+        player: &PlayerId,
+        snapshot: &ReportSnapshot,
+        cursor: &str,
+    ) -> PersistenceResult<Vec<AmountRow>> {
+        let limit = REPORT_CONTRIBUTION_BATCH_SIZE.to_string();
+        self.rows(
+            PLAYER_CONTRIBUTIONS,
+            &[
+                Text(player.as_str()),
+                Text(snapshot.as_str()),
+                Text(cursor),
+                Text(&limit),
+            ],
+        )
+        .await
+    }
 }
 
 fn report_game_name(
@@ -297,35 +573,61 @@ fn report_game_name(
         .transpose()
 }
 
-fn decode_player_report(
+struct PlayerReportHead {
+    player_id: PlayerId,
+    player_name: DisplayName,
+    snapshot: ReportSnapshot,
+    sessions: ReportPage<PlayerSessionSummary>,
+}
+
+fn decode_player_report_head(
     results: Vec<D1Result>,
     request: ReportPageRequest,
-) -> PersistenceResult<Option<PlayerReport>> {
+) -> PersistenceResult<Option<PlayerReportHead>> {
     let mut results = results.into_iter();
     let header = next_rows::<RosterRow>(&mut results, "player report header query")?;
-    let amounts = next_rows::<AmountRow>(&mut results, "player contribution query")?;
+    let snapshot = next_snapshot(&mut results)?;
     let sessions = next_rows::<PlayerSessionRow>(&mut results, "player sessions query")?;
     let Some(header) = header.into_iter().next() else {
         return Ok(None);
     };
     let (player_id, player_name) = header.decode().map_err(corrupt)?;
-    Ok(Some(PlayerReport {
+    Ok(Some(PlayerReportHead {
         player_id,
         player_name,
-        total: aggregate_amounts(amounts)?,
+        snapshot,
+        sessions: ReportPage::from_extra(decode(sessions)?, request),
+    }))
+}
+
+#[cfg(feature = "d1-test")]
+fn decode_player_report_at_snapshot(
+    results: Vec<D1Result>,
+    request: ReportPageRequest,
+    snapshot: ReportSnapshot,
+) -> PersistenceResult<Option<PlayerReportHead>> {
+    let mut results = results.into_iter();
+    let header = next_rows::<RosterRow>(&mut results, "player report header query")?;
+    let sessions = next_rows::<PlayerSessionRow>(&mut results, "player sessions query")?;
+    let Some(header) = header.into_iter().next() else {
+        return Ok(None);
+    };
+    let (player_id, player_name) = header.decode().map_err(corrupt)?;
+    Ok(Some(PlayerReportHead {
+        player_id,
+        player_name,
+        snapshot,
         sessions: ReportPage::from_extra(decode(sessions)?, request),
     }))
 }
 
 fn leaderboard_page(
     roster: Vec<RosterRow>,
-    contributions: Vec<ContributionRow>,
+    totals: BTreeMap<PlayerId, WideTotal>,
     request: ReportPageRequest,
 ) -> PersistenceResult<ReportPage<LeaderboardEntry>> {
     let roster = decode_roster(roster)?;
-    let contributions = decode_contributions(contributions)?;
-    validate_contributors(&roster, &contributions)?;
-    let mut entries = leaderboard_entries(roster, &contributions)?;
+    let mut entries = leaderboard_entries(roster, totals)?;
     entries.sort_by(compare_leaderboard_entries);
     paginate(entries, request)
 }
@@ -336,42 +638,24 @@ fn decode_roster(rows: Vec<RosterRow>) -> PersistenceResult<Vec<(PlayerId, Displ
         .collect()
 }
 
-fn decode_contributions(rows: Vec<ContributionRow>) -> PersistenceResult<Vec<(PlayerId, Cents)>> {
-    rows.into_iter()
-        .map(|row| row.decode().map_err(corrupt))
-        .collect()
-}
-
-fn validate_contributors(
-    roster: &[(PlayerId, DisplayName)],
-    contributions: &[(PlayerId, Cents)],
-) -> PersistenceResult<()> {
-    let ids: BTreeSet<_> = roster.iter().map(|(id, _)| id).collect();
-    if contributions.iter().any(|(id, _)| !ids.contains(id)) {
-        return Err(PersistenceError::Corrupt("report contributor"));
-    }
-    Ok(())
-}
-
 fn leaderboard_entries(
     roster: Vec<(PlayerId, DisplayName)>,
-    contributions: &[(PlayerId, Cents)],
+    mut totals: BTreeMap<PlayerId, WideTotal>,
 ) -> PersistenceResult<Vec<LeaderboardEntry>> {
     roster
         .into_iter()
-        .map(|player| leaderboard_entry(player, contributions))
+        .map(|player| leaderboard_entry(player, &mut totals))
         .collect()
 }
 
 fn leaderboard_entry(
     (player_id, player_name): (PlayerId, DisplayName),
-    contributions: &[(PlayerId, Cents)],
+    totals: &mut BTreeMap<PlayerId, WideTotal>,
 ) -> PersistenceResult<LeaderboardEntry> {
-    let amounts = contributions
-        .iter()
-        .filter(|(id, _)| id == &player_id)
-        .map(|(_, amount)| *amount);
-    let total = checked_report_total(amounts)?;
+    let total = totals
+        .remove(&player_id)
+        .ok_or(PersistenceError::Corrupt("report roster total"))?
+        .cents()?;
     Ok(LeaderboardEntry {
         player_id,
         player_name,
@@ -403,16 +687,52 @@ fn paginate<T>(items: Vec<T>, request: ReportPageRequest) -> PersistenceResult<R
     Ok(ReportPage::from_extra(items, request))
 }
 
-fn aggregate_amounts(rows: Vec<AmountRow>) -> PersistenceResult<Cents> {
-    let amounts = rows
-        .into_iter()
-        .map(|row| decode_cents(&row.amount_cents))
-        .collect::<PersistenceResult<Vec<_>>>()?;
-    checked_report_total(amounts)
+fn empty_totals(rows: &[RosterRow]) -> PersistenceResult<BTreeMap<PlayerId, WideTotal>> {
+    rows.iter()
+        .map(|row| Ok((PlayerId::new(&row.player_id)?, WideTotal::default())))
+        .collect()
 }
 
-fn checked_report_total(amounts: impl IntoIterator<Item = Cents>) -> PersistenceResult<Cents> {
-    Cents::checked_sum(amounts).map_err(|_| PersistenceError::Corrupt("report aggregate overflow"))
+fn add_contribution_batch(
+    totals: &mut BTreeMap<PlayerId, WideTotal>,
+    cursor: &mut ContributionCursor,
+    rows: Vec<ContributionRow>,
+) -> PersistenceResult<bool> {
+    let complete = rows.len() < REPORT_CONTRIBUTION_BATCH_SIZE;
+    for row in rows {
+        let (player, amount) = row.decode().map_err(corrupt)?;
+        let total = totals
+            .get_mut(&player)
+            .ok_or(PersistenceError::Corrupt("report contributor"))?;
+        total.add(amount)?;
+        cursor.player_id = row.player_id;
+        cursor.session_id = row.session_id;
+    }
+    Ok(complete)
+}
+
+fn add_amount_batch(
+    total: &mut WideTotal,
+    cursor: &mut String,
+    rows: Vec<AmountRow>,
+) -> PersistenceResult<bool> {
+    let complete = rows.len() < REPORT_CONTRIBUTION_BATCH_SIZE;
+    for row in rows {
+        total.add(decode_cents(&row.amount_cents)?)?;
+        *cursor = row.session_id;
+    }
+    Ok(complete)
+}
+
+fn next_snapshot(
+    results: &mut impl Iterator<Item = D1Result>,
+) -> PersistenceResult<ReportSnapshot> {
+    let rows = next_rows::<SnapshotRow>(results, "report snapshot query")?;
+    let row = rows
+        .into_iter()
+        .next()
+        .ok_or(PersistenceError::Corrupt("report snapshot"))?;
+    ReportSnapshot::decode(row)
 }
 
 fn next_rows<T: DeserializeOwned>(

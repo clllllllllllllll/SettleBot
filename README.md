@@ -8,7 +8,7 @@ A production-minded serverless application built to demonstrate cloud architectu
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–5 are complete locally; audit and recovery are next. The Telegram workflow, resilience controls, and reporting commands pass local transport and D1 tests but have not been exercised against live Telegram. The current CI workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–5 are implemented locally, and their implementation commits passed the validation-only GitHub Actions workflow; the current reporting batching remediation is locally validated but not yet committed or remotely validated. Audit and recovery are next. The Telegram workflow, resilience controls, and reporting commands have not been exercised against live Telegram or remote D1. The current CI workflow validates pull requests and `main`; it does not deploy.
 
 ## Overview
 
@@ -100,7 +100,7 @@ Outbound Telegram work has a five-second deadline. Telegram sends, workflow chan
 
 Authorized administrators can view overall and per-game roster leaderboards, a roster player's dated session results, chronological session history, and full details for one session. Overall and per-game rankings include permanent roster players, including zero-result players, and exclude one-time guests. Player and ordinary session histories also omit guest data; the relevant session's `/details` response is the only report that shows its guest identity and amount.
 
-Report queries use validated pages of 10 rows, cap page sizes at 50 and page numbers at 10,000, and sort with stable identity tie-breakers. Rankings order by total, display name, and player ID; histories order by the exact Asia/Singapore played date and session ID. Reporting is read-only and creates no workflow receipt or ledger write. See [Telegram reporting commands](agent_docs/telegram.md#reporting-commands) and [persistence reporting rules](agent_docs/persistence.md#reporting-queries).
+Report queries use validated pages of 10 rows, cap page sizes at 50 and page numbers at 10,000, and sort with stable identity tie-breakers. Rankings order by total, display name, and player ID; histories order by the exact Asia/Singapore played date and session ID. Exact contribution totals are accumulated in checked widened integers from deterministic 100-row D1 batches. A captured immutable-session boundary keeps each multi-batch report on one logical snapshot while bounding Worker memory; total scan work and latency still grow with matching ledger history. Reporting is read-only and creates no workflow receipt or ledger write. See [Telegram reporting commands](agent_docs/telegram.md#reporting-commands) and [persistence reporting rules](agent_docs/persistence.md#reporting-queries).
 
 ## Target architecture
 
@@ -163,7 +163,7 @@ pnpm build
 
 The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) exercise the same routing and response code as the Worker, verifying HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. `pnpm build` compiles the release Worker and performs a deployment dry run.
 
-`pnpm test:d1` builds feature-gated Rust test modules and runs 34 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all four migrations, and checks persistence, Telegram authorization, complete guided flows, overflow-safe reporting and pagination, rejected and oversized requests without ledger writes, catalog capacity races, throttling and delayed replay, concurrent updates, rollback, timeout/delivery replay, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
+`pnpm test:d1` builds feature-gated Rust test modules and runs 35 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all four migrations, and checks persistence, Telegram authorization, complete guided flows, multi-batch overflow-safe reporting, snapshot consistency and pagination, rejected and oversized requests without ledger writes, catalog capacity races, throttling and delayed replay, concurrent updates, rollback, timeout/delivery replay, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
 
 For local configuration, copy [.dev.vars.example](.dev.vars.example) to the ignored `.dev.vars` file and supply environment-specific values. The example is fake and cannot contact a real bot. Production and staging bindings, secrets, webhook configuration, and deployments remain separately authorized work.
 
@@ -179,7 +179,7 @@ For local configuration, copy [.dev.vars.example](.dev.vars.example) to the igno
 - Static structured error logs without request or ledger data
 - Credentials and authorization configuration read from Worker secret bindings
 
-Audited corrections, export, and backup/recovery procedures remain planned. Secret provisioning and isolated remote environments have not been configured.
+Phase 6 audit and recovery remains next: audited corrections or voids, export, backup restore verification, and recovery documentation are not implemented. Phase 7 delivery and operations also remains outstanding: secret provisioning, isolated remote environments, staging deployment/smoke tests, production approval, monitoring, and rollback verification do not exist. The repository is not production-ready or deployed.
 
 ## Planned environments
 
