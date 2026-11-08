@@ -73,7 +73,7 @@ test("migrations create an empty ledger and seed only Mahjong/Poker idempotently
   await database.prepare(seed).run();
   await database.prepare(seed).run();
   assert.equal((await success({ operation: "catalog" })).games.length, 2);
-  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM d1_migrations").first()).count, 4);
+  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM d1_migrations").first()).count, 5);
 });
 
 test("stable IDs are unique while repeated display names and case-distinct IDs are allowed", async () => {

@@ -1,10 +1,12 @@
 use super::{commands::ReportCommand, policy::PageSize, render::Reply, Error, Repository, Result};
 use crate::persistence::{
-    LeaderboardEntry, PlayerReport, ReportPage, ReportPageRequest, ReportParticipantIdentity,
-    SessionDetail, SessionSummary,
+    AuditKind, AuditPageRequest, AuditedSessionState, LeaderboardEntry, PlayerReport, ReportPage,
+    ReportPageRequest, ReportParticipantIdentity, SessionDetail, SessionSummary,
 };
 
 const REPORT_PAGE_SIZE: usize = 10;
+const AUDIT_PAGE_SIZE: usize = 3;
+const MAX_TELEGRAM_MESSAGE_CHARS: usize = 4_096;
 
 pub(super) async fn reply(
     repository: &impl Repository,
@@ -20,7 +22,10 @@ pub(super) async fn reply(
             player_report(repository, chat, player, page).await
         }
         ReportCommand::History { page } => history(repository, chat, page).await,
-        ReportCommand::Session { session } => details(repository, chat, session).await,
+        ReportCommand::Session {
+            session,
+            after_revision,
+        } => details(repository, chat, session, after_revision).await,
     }
 }
 
@@ -85,17 +90,22 @@ async fn details(
     repository: &impl Repository,
     chat: i64,
     session: crate::domain::SessionId,
+    after_revision: u64,
 ) -> Result<Reply> {
     let detail = repository
-        .session_detail(&session)
+        .session_detail(&session, audit_request(after_revision)?)
         .await?
         .ok_or(Error::Invalid)?;
-    Ok(Reply::text(chat, render_detail(&detail)))
+    Ok(Reply::text(chat, render_detail(&detail)?))
 }
 
 fn request(number: u32) -> Result<ReportPageRequest> {
     let size = PageSize::new(REPORT_PAGE_SIZE)?.value();
     ReportPageRequest::new(number, size).map_err(Into::into)
+}
+
+fn audit_request(after_revision: u64) -> Result<AuditPageRequest> {
+    AuditPageRequest::new(after_revision, AUDIT_PAGE_SIZE).map_err(Into::into)
 }
 
 fn append_leaderboard(
@@ -160,16 +170,55 @@ fn append_session(text: &mut String, session: &SessionSummary) {
     );
 }
 
-fn render_detail(detail: &SessionDetail) -> String {
+fn render_detail(detail: &SessionDetail) -> Result<String> {
     let session = &detail.session;
     let mut text = format!(
-        "Session {}\nGame: {}\nPlayed: {} (Asia/Singapore)",
+        "Session {}\nGame: {}\nPlayed: {} (Asia/Singapore)\nState: {}",
         session.session_id.as_str(),
         session.game_name.as_str(),
-        session.occurred_on
+        session.occurred_on,
+        audit_state(detail.state),
     );
     append_detail_entries(&mut text, detail);
-    text
+    append_audits(&mut text, detail);
+    append_audit_navigation(&mut text, detail);
+    if text.chars().count() > MAX_TELEGRAM_MESSAGE_CHARS {
+        return Err(Error::Limit);
+    }
+    Ok(text)
+}
+
+fn append_audit_navigation(text: &mut String, detail: &SessionDetail) {
+    if let Some(cursor) = detail.audits.next_after() {
+        *text += &format!(
+            "\nNext: /details {} {cursor}",
+            detail.session.session_id.as_str()
+        );
+    }
+}
+
+fn audit_state(state: AuditedSessionState) -> &'static str {
+    match state {
+        AuditedSessionState::Original => "original",
+        AuditedSessionState::Corrected => "corrected",
+        AuditedSessionState::Voided => "voided",
+    }
+}
+
+fn append_audits(text: &mut String, detail: &SessionDetail) {
+    for audit in detail.audits.items() {
+        let kind = match audit.kind {
+            AuditKind::Correction => "correction",
+            AuditKind::Void => "void",
+        };
+        *text += &format!(
+            "\nRevision {} — {kind} by administrator {} at {}: {}",
+            audit.revision,
+            audit.actor.value(),
+            audit.created_at,
+            audit.reason.as_str()
+        );
+    }
 }
 
 fn append_detail_entries(text: &mut String, detail: &SessionDetail) {

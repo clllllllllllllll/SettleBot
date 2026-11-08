@@ -166,6 +166,7 @@ impl D1Repository {
             Change::Flow(flow) => Ok(vec![self.save_flow(flow)?]),
             Change::Player(player) => Ok(vec![self.telegram_player(player)?]),
             Change::Game(game) => Ok(vec![self.telegram_game(game)?]),
+            Change::Audit(change) => Ok(self.audit_statements(change)?),
             Change::Confirm {
                 flow,
                 draft,

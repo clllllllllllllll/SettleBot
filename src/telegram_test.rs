@@ -23,6 +23,10 @@ struct Input {
     rate: bool,
     #[serde(default)]
     http: bool,
+    #[serde(default)]
+    export_http: bool,
+    export_token: Option<String>,
+    cursor: Option<String>,
     created_at: String,
 }
 
@@ -66,6 +70,9 @@ pub async fn telegram_test_request(input: String, environment: Env) -> String {
 
 async fn execute(input: &str, environment: Env) -> Result<Value> {
     let input: Input = serde_json::from_str(input).map_err(|_| Error::Invalid)?;
+    if input.export_http {
+        return export_request(input, environment).await;
+    }
     if input.http {
         return http_request(input, environment).await;
     }
@@ -106,6 +113,38 @@ async fn execute(input: &str, environment: Env) -> Result<Value> {
     let reply =
         telegram::handle(&config, input.secret.as_deref(), &body, &repository, &clock).await?;
     serde_json::to_value(reply).map_err(|_| Error::Storage)
+}
+
+async fn export_request(input: Input, environment: Env) -> Result<Value> {
+    let headers = worker::Headers::new();
+    if let Some(token) = input.export_token {
+        headers
+            .set("authorization", &format!("Bearer {token}"))
+            .map_err(|_| Error::Invalid)?;
+    }
+    let mut init = worker::RequestInit::new();
+    init.with_method(worker::Method::Get).with_headers(headers);
+    let suffix = input
+        .cursor
+        .map_or(String::new(), |cursor| format!("?cursor={cursor}"));
+    let request = worker::Request::new_with_init(
+        &format!("https://example.test/admin/export{suffix}"),
+        &init,
+    )
+    .map_err(|_| Error::Invalid)?
+    .try_into()
+    .map_err(|_| Error::Invalid)?;
+    let response = crate::export::response(request, environment)
+        .await
+        .map_err(|_| Error::Storage)?;
+    let cache_control = response
+        .headers()
+        .get(http::header::CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok());
+    Ok(
+        json!({"status": response.status().as_u16(), "body": response.body(),
+        "cache_control": cache_control}),
+    )
 }
 
 async fn http_request(input: Input, environment: Env) -> Result<Value> {

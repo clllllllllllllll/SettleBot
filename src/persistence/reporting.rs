@@ -1,9 +1,12 @@
-use crate::domain::{Cents, DisplayName, GameId, GuestId, OccurredOn, PlayerId, SessionId};
+use crate::domain::{
+    Cents, CreatedAt, DisplayName, GameId, GuestId, OccurredOn, PlayerId, SessionId,
+};
 
-use super::{PersistenceError, PersistenceResult};
+use super::{AuditKind, AuditReason, OwnerId, PersistenceError, PersistenceResult};
 
 pub const MAX_REPORT_PAGE_SIZE: usize = 50;
 pub const MAX_REPORT_PAGE_NUMBER: u32 = 10_000;
+pub const MAX_AUDIT_PAGE_SIZE: usize = 10;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReportPageRequest {
@@ -123,6 +126,77 @@ pub struct SessionDetailEntry {
 pub struct SessionDetail {
     pub session: SessionSummary,
     pub entries: Vec<SessionDetailEntry>,
+    pub state: AuditedSessionState,
+    pub audits: SessionAuditPage,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuditedSessionState {
+    Original,
+    Corrected,
+    Voided,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionAudit {
+    pub revision: u64,
+    pub kind: AuditKind,
+    pub actor: OwnerId,
+    pub reason: AuditReason,
+    pub created_at: CreatedAt,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuditPageRequest {
+    after_revision: u64,
+    size: usize,
+}
+
+impl AuditPageRequest {
+    pub fn new(after_revision: u64, size: usize) -> PersistenceResult<Self> {
+        if size == 0 || size > MAX_AUDIT_PAGE_SIZE {
+            return Err(PersistenceError::InvalidPage);
+        }
+        Ok(Self {
+            after_revision,
+            size,
+        })
+    }
+
+    pub fn after_revision(self) -> u64 {
+        self.after_revision
+    }
+
+    pub fn size(self) -> usize {
+        self.size
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionAuditPage {
+    items: Vec<SessionAudit>,
+    next_after: Option<u64>,
+}
+
+impl SessionAuditPage {
+    pub fn from_extra(mut items: Vec<SessionAudit>, request: AuditPageRequest) -> Self {
+        let has_more = items.len() > request.size();
+        items.truncate(request.size());
+        let next_after = if has_more {
+            items.last().map(|audit| audit.revision)
+        } else {
+            None
+        };
+        Self { items, next_after }
+    }
+
+    pub fn items(&self) -> &[SessionAudit] {
+        &self.items
+    }
+
+    pub fn next_after(&self) -> Option<u64> {
+        self.next_after
+    }
 }
 
 #[allow(async_fn_in_trait)]
@@ -149,6 +223,9 @@ pub trait ReportingRepository {
         request: ReportPageRequest,
     ) -> PersistenceResult<ReportPage<SessionSummary>>;
 
-    async fn session_detail(&self, session: &SessionId)
-        -> PersistenceResult<Option<SessionDetail>>;
+    async fn session_detail(
+        &self,
+        session: &SessionId,
+        audit_page: AuditPageRequest,
+    ) -> PersistenceResult<Option<SessionDetail>>;
 }

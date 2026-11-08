@@ -8,7 +8,9 @@ use super::{
 use crate::domain::{
     CreatedAt, DisplayName, Game, GameId, Player, PlayerId, RosterStatus, SessionId,
 };
-use crate::persistence::{OwnerId, Revision};
+use crate::persistence::{
+    AuditChange, AuditEntry, AuditPageRequest, AuditReason, OwnerId, Revision,
+};
 
 pub trait Clock {
     fn now(&self) -> Result<CreatedAt>;
@@ -86,6 +88,14 @@ async fn prepare<R: Repository, C: Clock>(
         Command::Start => start(repository, update).await,
         Command::Player(name) => add_player(repository, update.number, &name).await,
         Command::Game(name) => add_game(repository, update.number, &name).await,
+        Command::Correct {
+            session,
+            amounts,
+            reason,
+        } => correct(repository, clock, update, session, amounts, &reason).await,
+        Command::Void { session, reason } => {
+            void(repository, clock, update, session, &reason).await
+        }
         Command::Step {
             id,
             revision,
@@ -97,6 +107,71 @@ async fn prepare<R: Repository, C: Clock>(
         Command::Resume(_) => Err(Error::Invalid),
         Command::Report(_) => Err(Error::Invalid),
     }
+}
+
+async fn correct(
+    repository: &impl Repository,
+    clock: &impl Clock,
+    update: &AuthorizedUpdate,
+    session: SessionId,
+    amounts: Vec<crate::domain::Cents>,
+    reason: &str,
+) -> Result<Change> {
+    let detail = repository
+        .session_detail(&session, audit_lookup_page()?)
+        .await?
+        .ok_or(Error::Invalid)?;
+    let entries = corrected_entries(detail.entries, amounts)?;
+    Ok(Change::Audit(AuditChange::correction(
+        update.key.clone(),
+        session,
+        update.owner,
+        AuditReason::new(reason)?,
+        clock.now()?,
+        entries,
+    )?))
+}
+
+fn corrected_entries(
+    entries: Vec<crate::persistence::SessionDetailEntry>,
+    amounts: Vec<crate::domain::Cents>,
+) -> Result<Vec<AuditEntry>> {
+    if entries.len() != amounts.len() {
+        return Err(Error::Invalid);
+    }
+    Ok(entries
+        .into_iter()
+        .zip(amounts)
+        .map(|(entry, amount)| AuditEntry {
+            participant: entry.participant,
+            display_name: entry.display_name,
+            amount,
+        })
+        .collect())
+}
+
+async fn void(
+    repository: &impl Repository,
+    clock: &impl Clock,
+    update: &AuthorizedUpdate,
+    session: SessionId,
+    reason: &str,
+) -> Result<Change> {
+    repository
+        .session_detail(&session, audit_lookup_page()?)
+        .await?
+        .ok_or(Error::Invalid)?;
+    Ok(Change::Audit(AuditChange::void(
+        update.key.clone(),
+        session,
+        update.owner,
+        AuditReason::new(reason)?,
+        clock.now()?,
+    )))
+}
+
+fn audit_lookup_page() -> Result<AuditPageRequest> {
+    AuditPageRequest::new(0, 1).map_err(Into::into)
 }
 
 async fn add_player(repository: &impl Repository, number: u64, name: &str) -> Result<Change> {
@@ -192,6 +267,14 @@ fn response(change: &Change, chat: i64) -> Result<Reply> {
             player.id().as_str(),
         )),
         Change::Game(game) => Ok(added(chat, "game", game.name(), game.id().as_str())),
+        Change::Audit(change) => Ok(Reply::text(
+            chat,
+            format!(
+                "Audited {} saved for session {}.",
+                change.kind.as_str(),
+                change.session_id.as_str()
+            ),
+        )),
     }
 }
 

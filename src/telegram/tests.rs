@@ -112,11 +112,17 @@ fn text_commands_accept_the_telegram_bot_username_suffix() {
         ("/player@SettleBot Sample Player", "player:Sample Player"),
         ("/game@SettleBot Sample Game", "game:Sample Game"),
         ("/resume@SettleBot t1", "resume:t1"),
+        (
+            "/correct@SettleBot t1 +1.00 -1.00 | Fix entry",
+            "correct:t1:2:Fix entry",
+        ),
+        ("/void@SettleBot t1 | Duplicate", "void:t1:Duplicate"),
         ("/leaderboard@SettleBot 2", "leaderboard:2"),
         ("/gameboard@SettleBot poker 3", "gameboard:poker:3"),
         ("/stats@SettleBot player_one", "stats:player_one:1"),
         ("/history@SettleBot", "history:1"),
         ("/details@SettleBot t1", "details:t1"),
+        ("/details@SettleBot t1 2", "details:t1:2"),
         ("/step@SettleBot t1 2 +1.00", "step:t1:2:+1.00"),
         (
             "/guest@SettleBot t1 2 Sample Guest",
@@ -155,6 +161,14 @@ fn command_description(command: &Command) -> String {
         Command::Player(name) => format!("player:{name}"),
         Command::Game(name) => format!("game:{name}"),
         Command::Resume(id) => format!("resume:{}", id.as_str()),
+        Command::Correct {
+            session,
+            amounts,
+            reason,
+        } => format!("correct:{}:{}:{reason}", session.as_str(), amounts.len()),
+        Command::Void { session, reason } => {
+            format!("void:{}:{reason}", session.as_str())
+        }
         Command::Report(super::commands::ReportCommand::Leaderboard { page }) => {
             format!("leaderboard:{page}")
         }
@@ -167,8 +181,14 @@ fn command_description(command: &Command) -> String {
         Command::Report(super::commands::ReportCommand::History { page }) => {
             format!("history:{page}")
         }
-        Command::Report(super::commands::ReportCommand::Session { session }) => {
-            format!("details:{}", session.as_str())
+        Command::Report(super::commands::ReportCommand::Session {
+            session,
+            after_revision,
+        }) => {
+            if *after_revision == 0 {
+                return format!("details:{}", session.as_str());
+            }
+            format!("details:{}:{after_revision}", session.as_str())
         }
         Command::Step {
             id,
@@ -499,6 +519,7 @@ impl crate::persistence::ReportingRepository for NoAccess {
     async fn session_detail(
         &self,
         _: &crate::domain::SessionId,
+        _: crate::persistence::AuditPageRequest,
     ) -> PersistenceResult<Option<crate::persistence::SessionDetail>> {
         panic!("unauthorized read")
     }

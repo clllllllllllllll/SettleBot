@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phases 0–5 are implemented and verified locally. Their implementation commits are on `main` and passed the validation-only [CI workflow](../.github/workflows/ci.yml), which runs formatting, linting, native tests, local D1/workerd integration tests, and a production Worker build without deployment. The [Worker](../src/lib.rs), platform-independent [domain module](../src/domain/mod.rs), [persistence module](../src/persistence/mod.rs), and [Telegram module](../src/telegram/mod.rs) have verified local behavior through Phase 5. This evidence does not verify remote D1, a deployed Worker, staging or production configuration, or live Telegram. The reporting batching remediation after the Phase 5 implementation commit is verified locally only and still requires a commit and successful CI run for remote validation. Phases 6–7 remain explicitly outstanding; the next authorized implementation gate is Phase 6 audit and recovery, not production delivery.
+Phases 0–6 are implemented and verified locally. The Phase 0–5 implementation commits are on `main` and passed the validation-only [CI workflow](../.github/workflows/ci.yml), which runs formatting, linting, native tests, local D1/workerd integration tests, and a production Worker build without deployment. The reporting batching remediation is also on `main`. Phase 6 is working-tree implementation with local evidence only and still requires a commit and successful CI run for remote validation. This evidence does not verify remote D1, a deployed Worker, remote backup/restore, staging or production configuration, or live Telegram. Phase 7 remains outstanding; delivery and external setup are not authorized by the Phase 6 implementation request.
 
 ## Phase 0 — Foundation
 
@@ -141,7 +141,19 @@ The 2026-11-03 reporting remediation bounds contribution reads to deterministic 
 - Implement authorized corrections through audited revisions or voids; preserve original records. Add CSV or JSON export, backups, and documented recovery procedures.
 - Gate: tests verify audit lineage and corrected aggregates without silently rewriting history. Restore a backup into an isolated test database and verify record counts, ledger totals, and audit history. Document the tested recovery and migration procedures.
 
-This is the next authorized phase. It must define how correction/void records interact with the immutable reporting snapshot boundary before changing the schema or aggregation model. Completion requires tested audit lineage, export, isolated backup restore, recovery verification, and concise operational documentation; none exists yet.
+### Verification evidence
+
+[Migration 0005](../migrations/0005_audit_recovery.sql), the typed [audit contract](../src/persistence/audit.rs), D1 [audit](../src/persistence/d1/audit.rs), [reporting](../src/persistence/d1/reporting.rs), and [export](../src/persistence/d1/export.rs) adapters, and authorized Telegram correction/void commands implement this phase. Original sessions and entries remain immutable. Reports select the latest correction or exclude a latest void, and capture both session-row and audit-row boundaries before batched aggregation. `/details` reads its header, effective entries, audit page, and current state in one D1 batch, traverses three audit events per revision cursor, and enforces Telegram's 4,096-character boundary. The bearer-authenticated production export route and operator CLI emit fixed-work cursor chunks containing all catalog rows, original records, and complete audit lineage without catalog or session-count ceilings. Player, game, session, and audit row boundaries keep every continuation chunk on the initial export snapshot.
+
+Local checks passed on 2026-11-03 with the pinned toolchains:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --all-targets -- -D warnings`
+- `cargo test --locked --all-targets` — 68 passed, including all prior domain, persistence, Telegram, and request tests plus correction/void parsing, export cursor validation, and export-route authorization helpers.
+- `pnpm test:d1` — 37 passed after applying all five migrations to empty local D1 databases. Two Phase 6 cases verify numeric authorization, required reasons, rollback when the final Telegram receipt fails, original-row preservation, corrected aggregates, void exclusion, revision-cursor detail traversal within 4,096 characters, snapshot-consistent effective detail entries, a pre-correction report snapshot, production export authentication and `no-store`, bounded multi-chunk audit and catalog export with 24 active plus one inactive player, exclusion of catalog rows appended after the first chunk, a session at row ID 10,001, and restore into a second isolated D1 with matching record counts, totals, and all audit lineage.
+- `pnpm build` — release WebAssembly build and Wrangler deployment dry run succeeded; no deployment was performed.
+
+The tested operational procedure is documented in [recovery.md](recovery.md). No remote D1 export, restore, migration, secret change, live Telegram call, cloud resource, or deployment was performed. Phase 6 has no remote CI evidence yet.
 
 ## Phase 7 — Delivery and operations
 

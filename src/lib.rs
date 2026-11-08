@@ -1,4 +1,5 @@
 pub mod domain;
+mod export;
 mod health;
 pub mod persistence;
 pub mod telegram;
@@ -25,6 +26,9 @@ async fn fetch(
 ) -> Result<Response<String>> {
     if request.uri().path() == telegram::worker::WEBHOOK_PATH && request.method() == Method::POST {
         return telegram::worker::webhook(request, environment).await;
+    }
+    if request.uri().path() == export::EXPORT_PATH && request.method() == Method::GET {
+        return export::response(request, environment).await;
     }
     handle_request(request)
 }

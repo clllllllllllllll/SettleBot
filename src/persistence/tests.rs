@@ -4,9 +4,28 @@ use crate::domain::{
 };
 
 use super::{
-    DraftState, OwnerId, PersistenceError, PersistentDraft, ReportPage, ReportPageRequest,
-    Revision, UpdateKey, MAX_REPORT_PAGE_NUMBER, MAX_REPORT_PAGE_SIZE,
+    DraftState, ExportRequest, OwnerId, PersistenceError, PersistentDraft, ReportPage,
+    ReportPageRequest, Revision, UpdateKey, MAX_REPORT_PAGE_NUMBER, MAX_REPORT_PAGE_SIZE,
 };
+
+#[test]
+fn export_cursors_are_independent_of_report_page_limits() {
+    let request = ExportRequest::resume("20.30.20000.30000.20.30.15000.42").unwrap();
+    assert!(request.cursor().is_some());
+    for cursor in [
+        "",
+        "1.2.3.4.5.6.7",
+        "1.2.3.4.5.6.7.8.9",
+        "1.2.10.20.1.2.11.0",
+        "1.2.10.20.2.3.0.0",
+        "-1.0.0.0.0.0.0.0",
+    ] {
+        assert_eq!(
+            ExportRequest::resume(cursor),
+            Err(PersistenceError::InvalidExportCursor)
+        );
+    }
+}
 
 #[test]
 fn report_pages_have_bounded_numbers_sizes_and_offsets() {

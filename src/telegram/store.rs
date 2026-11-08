@@ -1,13 +1,14 @@
 use super::{flow::Flow, render::Reply, Result};
 use crate::domain::{ConfirmedSession, Game, Player};
 use crate::persistence::{
-    GameRepository, PersistentDraft, ReportingRepository, RosterRepository, UpdateKey,
+    AuditChange, GameRepository, PersistentDraft, ReportingRepository, RosterRepository, UpdateKey,
 };
 
 pub(crate) enum Change {
     Flow(Flow),
     Player(Player),
     Game(Game),
+    Audit(AuditChange),
     Confirm {
         flow: Flow,
         draft: Box<PersistentDraft>,

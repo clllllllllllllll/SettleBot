@@ -1,10 +1,11 @@
 use crate::domain::{CreatedAt, Game, Player, SessionId};
 
 use super::{
-    Confirmation, ConfirmationRepository, DraftRepository, DraftState, GameLeaderboard,
-    GameRepository, LeaderboardEntry, OwnerId, PersistenceError, PersistenceResult,
-    PersistentDraft, PlayerReport, ReportPage, ReportPageRequest, ReportingRepository, Revision,
-    RosterRepository, SessionDetail, SessionRepository, SessionSummary, UpdateKey,
+    AuditChange, AuditPageRequest, AuditRepository, Confirmation, ConfirmationRepository,
+    DraftRepository, DraftState, ExportRepository, ExportRequest, GameLeaderboard, GameRepository,
+    LeaderboardEntry, OwnerId, PersistenceError, PersistenceResult, PersistentDraft, PlayerReport,
+    ReportPage, ReportPageRequest, ReportingRepository, Revision, RosterRepository, SessionDetail,
+    SessionRepository, SessionSummary, UpdateKey,
 };
 
 pub struct Ledger<'a, R> {
@@ -114,8 +115,21 @@ impl<R: ReportingRepository> Ledger<'_, R> {
     pub async fn session_detail(
         &self,
         session: &SessionId,
+        audit_page: AuditPageRequest,
     ) -> PersistenceResult<Option<SessionDetail>> {
-        self.repository.session_detail(session).await
+        self.repository.session_detail(session, audit_page).await
+    }
+}
+
+impl<R: ExportRepository> Ledger<'_, R> {
+    pub async fn export_json(&self, request: &ExportRequest) -> PersistenceResult<String> {
+        self.repository.export_json(request).await
+    }
+}
+
+impl<R: AuditRepository> Ledger<'_, R> {
+    pub async fn audit(&self, change: &AuditChange) -> PersistenceResult<()> {
+        self.repository.commit_audit(change).await
     }
 }
 

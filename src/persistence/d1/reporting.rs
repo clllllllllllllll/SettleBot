@@ -3,11 +3,15 @@ use std::collections::BTreeMap;
 use serde::{de::DeserializeOwned, Deserialize};
 use worker::{D1Result, D1Type::Text};
 
-use crate::domain::{Cents, DisplayName, GameId, GuestId, OccurredOn, PlayerId, SessionId};
+use crate::domain::{
+    Cents, CreatedAt, DisplayName, GameId, GuestId, OccurredOn, PlayerId, SessionId,
+};
 use crate::persistence::{
-    GameLeaderboard, LeaderboardEntry, PersistenceError, PersistenceResult, PlayerReport,
+    AuditKind, AuditPageRequest, AuditReason, AuditedSessionState, GameLeaderboard,
+    LeaderboardEntry, OwnerId, PersistenceError, PersistenceResult, PlayerReport,
     PlayerSessionSummary, ReportPage, ReportPageRequest, ReportParticipantIdentity,
-    ReportingRepository, SessionDetail, SessionDetailEntry, SessionSummary,
+    ReportingRepository, SessionAudit, SessionAuditPage, SessionDetail, SessionDetailEntry,
+    SessionSummary,
 };
 
 use super::{decode_rows, records::corrupt, D1Repository};
@@ -15,72 +19,137 @@ use super::{decode_rows, records::corrupt, D1Repository};
 const REPORT_ROSTER: &str = "
     SELECT id AS player_id, display_name AS player_name FROM players ORDER BY id";
 const REPORT_SNAPSHOT: &str = "
-    SELECT CAST(COALESCE(MAX(rowid), 0) AS TEXT) AS max_session_rowid FROM sessions";
+    SELECT CAST(COALESCE((SELECT MAX(rowid) FROM sessions), 0) AS TEXT) AS max_session_rowid,
+           CAST(COALESCE((SELECT MAX(rowid) FROM session_audits), 0) AS TEXT) AS max_audit_rowid";
 const OVERALL_CONTRIBUTIONS: &str = "
-    SELECT entries.roster_player_id AS player_id, entries.session_id,
-           CAST(entries.amount_cents AS TEXT) AS amount_cents
-    FROM session_entries AS entries JOIN sessions ON sessions.id = entries.session_id
-    WHERE entries.roster_player_id IS NOT NULL
-      AND sessions.rowid <= CAST(?1 AS INTEGER)
-      AND (entries.roster_player_id > ?2
-           OR (entries.roster_player_id = ?2 AND entries.session_id > ?3))
-    ORDER BY entries.roster_player_id, entries.session_id
-    LIMIT CAST(?4 AS INTEGER)";
+    WITH effective AS (
+      SELECT e.roster_player_id, e.session_id, e.amount_cents
+      FROM session_entries e JOIN sessions s ON s.id = e.session_id
+      WHERE s.rowid <= CAST(?1 AS INTEGER) AND NOT EXISTS (
+        SELECT 1 FROM session_audits a
+        WHERE a.session_id = s.id AND a.rowid <= CAST(?2 AS INTEGER))
+      UNION ALL
+      SELECT e.roster_player_id, a.session_id, e.amount_cents
+      FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
+      JOIN sessions s ON s.id = a.session_id
+      WHERE s.rowid <= CAST(?1 AS INTEGER) AND a.kind = 'correction'
+        AND a.rowid = (SELECT MAX(latest.rowid) FROM session_audits latest
+          WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?2 AS INTEGER))
+    )
+    SELECT roster_player_id AS player_id, session_id,
+           CAST(amount_cents AS TEXT) AS amount_cents FROM effective
+    WHERE roster_player_id IS NOT NULL AND (roster_player_id > ?3
+      OR (roster_player_id = ?3 AND session_id > ?4))
+    ORDER BY roster_player_id, session_id LIMIT CAST(?5 AS INTEGER)";
 const GAME: &str = "SELECT display_name FROM games WHERE id = ?";
 const GAME_CONTRIBUTIONS: &str = "
-    SELECT entries.roster_player_id AS player_id, entries.session_id,
-           CAST(entries.amount_cents AS TEXT) AS amount_cents
-    FROM session_entries AS entries JOIN sessions ON sessions.id = entries.session_id
-    WHERE entries.roster_player_id IS NOT NULL AND sessions.game_id = ?1
-      AND sessions.rowid <= CAST(?2 AS INTEGER)
-      AND (entries.roster_player_id > ?3
-           OR (entries.roster_player_id = ?3 AND entries.session_id > ?4))
-    ORDER BY entries.roster_player_id, entries.session_id
-    LIMIT CAST(?5 AS INTEGER)";
+    WITH effective AS (
+      SELECT e.roster_player_id, e.session_id, e.amount_cents
+      FROM session_entries e JOIN sessions s ON s.id = e.session_id
+      WHERE s.game_id = ?1 AND s.rowid <= CAST(?2 AS INTEGER) AND NOT EXISTS (
+        SELECT 1 FROM session_audits a
+        WHERE a.session_id = s.id AND a.rowid <= CAST(?3 AS INTEGER))
+      UNION ALL
+      SELECT e.roster_player_id, a.session_id, e.amount_cents
+      FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
+      JOIN sessions s ON s.id = a.session_id
+      WHERE s.game_id = ?1 AND s.rowid <= CAST(?2 AS INTEGER) AND a.kind = 'correction'
+        AND a.rowid = (SELECT MAX(latest.rowid) FROM session_audits latest
+          WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?3 AS INTEGER))
+    )
+    SELECT roster_player_id AS player_id, session_id,
+           CAST(amount_cents AS TEXT) AS amount_cents FROM effective
+    WHERE roster_player_id IS NOT NULL AND (roster_player_id > ?4
+      OR (roster_player_id = ?4 AND session_id > ?5))
+    ORDER BY roster_player_id, session_id LIMIT CAST(?6 AS INTEGER)";
 const PLAYER: &str = "
     SELECT id AS player_id, display_name AS player_name FROM players WHERE id = ?";
 const PLAYER_CONTRIBUTIONS: &str = "
-    SELECT entries.session_id, CAST(entries.amount_cents AS TEXT) AS amount_cents
-    FROM session_entries AS entries JOIN sessions ON sessions.id = entries.session_id
-    WHERE entries.roster_player_id = ?1
-      AND sessions.rowid <= CAST(?2 AS INTEGER) AND entries.session_id > ?3
-    ORDER BY entries.session_id LIMIT CAST(?4 AS INTEGER)";
+    WITH effective AS (
+      SELECT e.roster_player_id, e.session_id, e.amount_cents
+      FROM session_entries e JOIN sessions s ON s.id = e.session_id
+      WHERE s.rowid <= CAST(?2 AS INTEGER) AND NOT EXISTS (
+        SELECT 1 FROM session_audits a
+        WHERE a.session_id = s.id AND a.rowid <= CAST(?3 AS INTEGER))
+      UNION ALL
+      SELECT e.roster_player_id, a.session_id, e.amount_cents
+      FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
+      JOIN sessions s ON s.id = a.session_id
+      WHERE s.rowid <= CAST(?2 AS INTEGER) AND a.kind = 'correction'
+        AND a.rowid = (SELECT MAX(latest.rowid) FROM session_audits latest
+          WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?3 AS INTEGER))
+    )
+    SELECT session_id, CAST(amount_cents AS TEXT) AS amount_cents FROM effective
+    WHERE roster_player_id = ?1 AND session_id > ?4
+    ORDER BY session_id LIMIT CAST(?5 AS INTEGER)";
 const PLAYER_SESSIONS: &str = "
-    SELECT sessions.id AS session_id, games.display_name AS game_name,
-           sessions.occurred_on, CAST(entries.amount_cents AS TEXT) AS amount_cents
-    FROM session_entries AS entries
-    JOIN sessions ON sessions.id = entries.session_id
-    JOIN games ON games.id = sessions.game_id
-    WHERE entries.roster_player_id = ?1
-      AND sessions.rowid <= (SELECT COALESCE(MAX(rowid), 0) FROM sessions)
-    ORDER BY sessions.occurred_on DESC, sessions.id DESC
+    WITH effective AS (
+      SELECT e.roster_player_id, e.session_id, e.amount_cents
+      FROM session_entries e JOIN sessions s ON s.id = e.session_id
+      WHERE NOT EXISTS (SELECT 1 FROM session_audits a WHERE a.session_id = s.id)
+      UNION ALL
+      SELECT e.roster_player_id, a.session_id, e.amount_cents
+      FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
+      WHERE a.kind = 'correction' AND a.rowid = (
+        SELECT MAX(latest.rowid) FROM session_audits latest WHERE latest.session_id = a.session_id)
+    )
+    SELECT s.id AS session_id, games.display_name AS game_name,
+           s.occurred_on, CAST(e.amount_cents AS TEXT) AS amount_cents
+    FROM effective e JOIN sessions s ON s.id = e.session_id
+    JOIN games ON games.id = s.game_id WHERE e.roster_player_id = ?1
+    ORDER BY s.occurred_on DESC, s.id DESC
     LIMIT CAST(?2 AS INTEGER) OFFSET CAST(?3 AS INTEGER)";
 #[cfg(feature = "d1-test")]
 const PLAYER_SESSIONS_AT_SNAPSHOT: &str = "
-    SELECT sessions.id AS session_id, games.display_name AS game_name,
-           sessions.occurred_on, CAST(entries.amount_cents AS TEXT) AS amount_cents
-    FROM session_entries AS entries
-    JOIN sessions ON sessions.id = entries.session_id
-    JOIN games ON games.id = sessions.game_id
-    WHERE entries.roster_player_id = ?1 AND sessions.rowid <= CAST(?2 AS INTEGER)
-    ORDER BY sessions.occurred_on DESC, sessions.id DESC
-    LIMIT CAST(?3 AS INTEGER) OFFSET CAST(?4 AS INTEGER)";
+    WITH effective AS (
+      SELECT e.roster_player_id, e.session_id, e.amount_cents
+      FROM session_entries e JOIN sessions s ON s.id = e.session_id
+      WHERE s.rowid <= CAST(?2 AS INTEGER) AND NOT EXISTS (
+        SELECT 1 FROM session_audits a WHERE a.session_id = s.id AND a.rowid <= CAST(?3 AS INTEGER))
+      UNION ALL
+      SELECT e.roster_player_id, a.session_id, e.amount_cents
+      FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
+      JOIN sessions s ON s.id = a.session_id
+      WHERE s.rowid <= CAST(?2 AS INTEGER) AND a.kind = 'correction' AND a.rowid = (
+        SELECT MAX(latest.rowid) FROM session_audits latest
+        WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?3 AS INTEGER))
+    )
+    SELECT s.id AS session_id, games.display_name AS game_name,
+           s.occurred_on, CAST(e.amount_cents AS TEXT) AS amount_cents
+    FROM effective e JOIN sessions s ON s.id = e.session_id
+    JOIN games ON games.id = s.game_id WHERE e.roster_player_id = ?1
+    ORDER BY s.occurred_on DESC, s.id DESC
+    LIMIT CAST(?4 AS INTEGER) OFFSET CAST(?5 AS INTEGER)";
 const SESSION_HISTORY: &str = "
     SELECT sessions.id AS session_id, games.display_name AS game_name, sessions.occurred_on
     FROM sessions JOIN games ON games.id = sessions.game_id
+    WHERE COALESCE((SELECT kind FROM session_audits
+      WHERE session_id = sessions.id ORDER BY rowid DESC LIMIT 1), 'original') <> 'void'
     ORDER BY sessions.occurred_on DESC, sessions.id DESC
     LIMIT CAST(?1 AS INTEGER) OFFSET CAST(?2 AS INTEGER)";
 const SESSION_HEADER: &str = "
     SELECT sessions.id AS session_id, games.display_name AS game_name, sessions.occurred_on
     FROM sessions JOIN games ON games.id = sessions.game_id WHERE sessions.id = ?";
 const SESSION_DETAIL_ENTRIES: &str = "
-    SELECT entries.kind, entries.identity_id,
-           CASE WHEN entries.kind = 'roster' THEN players.display_name ELSE entries.guest_name END
-               AS display_name,
-           CAST(entries.amount_cents AS TEXT) AS amount_cents
-    FROM session_entries AS entries
-    LEFT JOIN players ON players.id = entries.roster_player_id
-    WHERE entries.session_id = ? ORDER BY entries.position";
+    WITH latest_correction AS (SELECT id FROM session_audits
+      WHERE session_id = ?1 AND kind = 'correction' ORDER BY rowid DESC LIMIT 1),
+    effective AS (
+      SELECT kind, identity_id, roster_player_id, guest_name, position, amount_cents
+      FROM session_entries WHERE session_id = ?1 AND NOT EXISTS (SELECT 1 FROM latest_correction)
+      UNION ALL
+      SELECT kind, identity_id, roster_player_id, guest_name, position, amount_cents
+      FROM session_audit_entries WHERE audit_id = (SELECT id FROM latest_correction)
+    )
+    SELECT e.kind, e.identity_id,
+      CASE WHEN e.kind = 'roster' THEN players.display_name ELSE e.guest_name END AS display_name,
+      CAST(e.amount_cents AS TEXT) AS amount_cents FROM effective e
+    LEFT JOIN players ON players.id = e.roster_player_id ORDER BY e.position";
+const SESSION_AUDITS: &str = "
+    SELECT CAST(revision AS TEXT) AS revision, kind, actor_id, reason, created_at
+    FROM session_audits WHERE session_id = ?1 AND revision > CAST(?2 AS INTEGER)
+    ORDER BY session_audits.revision LIMIT CAST(?3 AS INTEGER)";
+const SESSION_AUDIT_STATE: &str = "
+    SELECT kind FROM session_audits WHERE session_id = ? ORDER BY revision DESC LIMIT 1";
 
 const REPORT_CONTRIBUTION_BATCH_SIZE: usize = 100;
 
@@ -124,33 +193,49 @@ struct AmountRow {
 #[derive(Deserialize)]
 struct SnapshotRow {
     max_session_rowid: String,
+    max_audit_rowid: String,
 }
 
 #[derive(Clone)]
-struct ReportSnapshot(String);
+struct ReportSnapshot {
+    sessions: String,
+    audits: String,
+}
 
 impl ReportSnapshot {
     fn decode(row: SnapshotRow) -> PersistenceResult<Self> {
-        let value = row
-            .max_session_rowid
-            .parse::<i64>()
-            .map_err(|_| PersistenceError::Corrupt("report snapshot"))?;
-        if value < 0 {
+        let sessions = snapshot_value(&row.max_session_rowid)?;
+        let audits = snapshot_value(&row.max_audit_rowid)?;
+        if sessions < 0 || audits < 0 {
             return Err(PersistenceError::Corrupt("report snapshot"));
         }
-        Ok(Self(row.max_session_rowid))
+        Ok(Self {
+            sessions: row.max_session_rowid,
+            audits: row.max_audit_rowid,
+        })
     }
 
     #[cfg(feature = "d1-test")]
     fn from_text(value: &str) -> PersistenceResult<Self> {
+        let (sessions, audits) = value
+            .split_once(':')
+            .ok_or(PersistenceError::Corrupt("report snapshot"))?;
         Self::decode(SnapshotRow {
-            max_session_rowid: value.to_owned(),
+            max_session_rowid: sessions.to_owned(),
+            max_audit_rowid: audits.to_owned(),
         })
     }
 
-    fn as_str(&self) -> &str {
-        &self.0
+    #[cfg(feature = "d1-test")]
+    fn text(&self) -> String {
+        format!("{}:{}", self.sessions, self.audits)
     }
+}
+
+fn snapshot_value(value: &str) -> PersistenceResult<i64> {
+    value
+        .parse()
+        .map_err(|_| PersistenceError::Corrupt("report snapshot"))
 }
 
 #[derive(Default)]
@@ -230,6 +315,47 @@ struct DetailEntryRow {
     amount_cents: String,
 }
 
+#[derive(Deserialize)]
+struct AuditRow {
+    revision: String,
+    kind: String,
+    actor_id: String,
+    reason: String,
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+struct AuditStateRow {
+    kind: String,
+}
+
+impl AuditRow {
+    fn decode(self) -> PersistenceResult<SessionAudit> {
+        let kind = match self.kind.as_str() {
+            "correction" => AuditKind::Correction,
+            "void" => AuditKind::Void,
+            _ => return Err(PersistenceError::Corrupt("audit kind")),
+        };
+        Ok(SessionAudit {
+            revision: self
+                .revision
+                .parse()
+                .map_err(|_| PersistenceError::Corrupt("audit revision"))?,
+            kind,
+            actor: OwnerId::new(
+                self.actor_id
+                    .parse()
+                    .map_err(|_| PersistenceError::Corrupt("audit actor"))?,
+            )
+            .map_err(corrupt)?,
+            reason: AuditReason::new(&self.reason).map_err(corrupt)?,
+            created_at: CreatedAt::parse(&self.created_at)
+                .map_err(PersistenceError::from)
+                .map_err(corrupt)?,
+        })
+    }
+}
+
 impl DetailEntryRow {
     fn decode(self, session: &SessionId) -> PersistenceResult<SessionDetailEntry> {
         let participant = match self.kind.as_str() {
@@ -307,16 +433,10 @@ impl ReportingRepository for D1Repository {
     async fn session_detail(
         &self,
         session: &SessionId,
+        audit_page: AuditPageRequest,
     ) -> PersistenceResult<Option<SessionDetail>> {
-        let Some(header) = self.report_session_header(session).await? else {
-            return Ok(None);
-        };
-        let entries = self.report_detail_entries(session).await?;
-        validate_detail(&entries)?;
-        Ok(Some(SessionDetail {
-            session: header,
-            entries,
-        }))
+        let statements = self.session_detail_statements(session, audit_page)?;
+        decode_session_detail(self.batch(statements).await?, session, audit_page)
     }
 }
 
@@ -428,7 +548,7 @@ impl D1Repository {
             .into_iter()
             .next()
             .ok_or(PersistenceError::Corrupt("report snapshot"))?;
-        Ok(ReportSnapshot::decode(row)?.0)
+        Ok(ReportSnapshot::decode(row)?.text())
     }
 
     #[cfg(feature = "d1-test")]
@@ -473,7 +593,8 @@ impl D1Repository {
                 PLAYER_SESSIONS_AT_SNAPSHOT,
                 &[
                     Text(player.as_str()),
-                    Text(snapshot.as_str()),
+                    Text(&snapshot.sessions),
+                    Text(&snapshot.audits),
                     Text(&limit),
                     Text(&offset),
                 ],
@@ -481,28 +602,26 @@ impl D1Repository {
         ])
     }
 
-    async fn report_session_header(
+    fn session_detail_statements(
         &self,
         session: &SessionId,
-    ) -> PersistenceResult<Option<SessionSummary>> {
-        let row = self
-            .rows::<SessionSummaryRow>(SESSION_HEADER, &[Text(session.as_str())])
-            .await?
-            .into_iter()
-            .next();
-        row.map(|row| row.decode().map_err(corrupt)).transpose()
-    }
-
-    async fn report_detail_entries(
-        &self,
-        session: &SessionId,
-    ) -> PersistenceResult<Vec<SessionDetailEntry>> {
-        let rows = self
-            .rows::<DetailEntryRow>(SESSION_DETAIL_ENTRIES, &[Text(session.as_str())])
-            .await?;
-        rows.into_iter()
-            .map(|row| row.decode(session).map_err(corrupt))
-            .collect()
+        request: AuditPageRequest,
+    ) -> PersistenceResult<Vec<worker::D1PreparedStatement>> {
+        let limit = request
+            .size()
+            .checked_add(1)
+            .ok_or(PersistenceError::InvalidPage)?
+            .to_string();
+        let after = request.after_revision().to_string();
+        Ok(vec![
+            self.statement(SESSION_HEADER, &[Text(session.as_str())])?,
+            self.statement(SESSION_DETAIL_ENTRIES, &[Text(session.as_str())])?,
+            self.statement(
+                SESSION_AUDITS,
+                &[Text(session.as_str()), Text(&after), Text(&limit)],
+            )?,
+            self.statement(SESSION_AUDIT_STATE, &[Text(session.as_str())])?,
+        ])
     }
 
     async fn overall_contribution_batch(
@@ -514,7 +633,8 @@ impl D1Repository {
         self.rows(
             OVERALL_CONTRIBUTIONS,
             &[
-                Text(snapshot.as_str()),
+                Text(&snapshot.sessions),
+                Text(&snapshot.audits),
                 Text(&cursor.player_id),
                 Text(&cursor.session_id),
                 Text(&limit),
@@ -534,7 +654,8 @@ impl D1Repository {
             GAME_CONTRIBUTIONS,
             &[
                 Text(game.as_str()),
-                Text(snapshot.as_str()),
+                Text(&snapshot.sessions),
+                Text(&snapshot.audits),
                 Text(&cursor.player_id),
                 Text(&cursor.session_id),
                 Text(&limit),
@@ -554,13 +675,65 @@ impl D1Repository {
             PLAYER_CONTRIBUTIONS,
             &[
                 Text(player.as_str()),
-                Text(snapshot.as_str()),
+                Text(&snapshot.sessions),
+                Text(&snapshot.audits),
                 Text(cursor),
                 Text(&limit),
             ],
         )
         .await
     }
+}
+
+fn decode_session_detail(
+    results: Vec<D1Result>,
+    session: &SessionId,
+    request: AuditPageRequest,
+) -> PersistenceResult<Option<SessionDetail>> {
+    let mut results = results.into_iter();
+    let headers = next_rows::<SessionSummaryRow>(&mut results, "session detail header query")?;
+    let Some(header) = headers.into_iter().next() else {
+        return Ok(None);
+    };
+    let entries = decode_detail_entries(&mut results, session)?;
+    validate_detail(&entries)?;
+    Ok(Some(SessionDetail {
+        session: header.decode().map_err(corrupt)?,
+        entries,
+        audits: decode_detail_audits(&mut results, request)?,
+        state: decode_detail_state(&mut results)?,
+    }))
+}
+
+fn decode_detail_entries(
+    results: &mut impl Iterator<Item = D1Result>,
+    session: &SessionId,
+) -> PersistenceResult<Vec<SessionDetailEntry>> {
+    next_rows::<DetailEntryRow>(results, "session detail entries query")?
+        .into_iter()
+        .map(|row| row.decode(session).map_err(corrupt))
+        .collect()
+}
+
+fn decode_detail_audits(
+    results: &mut impl Iterator<Item = D1Result>,
+    request: AuditPageRequest,
+) -> PersistenceResult<SessionAuditPage> {
+    let audits = next_rows::<AuditRow>(results, "session detail audits query")?
+        .into_iter()
+        .map(|row| row.decode().map_err(corrupt))
+        .collect::<PersistenceResult<Vec<_>>>()?;
+    Ok(SessionAuditPage::from_extra(audits, request))
+}
+
+fn decode_detail_state(
+    results: &mut impl Iterator<Item = D1Result>,
+) -> PersistenceResult<AuditedSessionState> {
+    let kind = next_rows::<AuditStateRow>(results, "session detail state query")?
+        .into_iter()
+        .next()
+        .map(|row| row.kind);
+    audit_state(kind.as_deref())
 }
 
 fn report_game_name(
@@ -799,4 +972,13 @@ fn validate_detail(entries: &[SessionDetailEntry]) -> PersistenceResult<()> {
         return Err(PersistenceError::Corrupt("report session total"));
     }
     Ok(())
+}
+
+fn audit_state(kind: Option<&str>) -> PersistenceResult<AuditedSessionState> {
+    match kind {
+        None => Ok(AuditedSessionState::Original),
+        Some("correction") => Ok(AuditedSessionState::Corrected),
+        Some("void") => Ok(AuditedSessionState::Voided),
+        Some(_) => Err(PersistenceError::Corrupt("audit state")),
+    }
 }

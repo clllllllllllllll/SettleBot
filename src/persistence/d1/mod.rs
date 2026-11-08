@@ -1,9 +1,11 @@
 //! Cloudflare D1 adapter. Money and numeric IDs cross the JS boundary as decimal
 //! text; SQLite stores cents as INTEGER without JavaScript's 53-bit rounding.
 
+mod audit;
 mod catalog;
 mod confirmation;
 mod drafts;
+mod export;
 mod records;
 mod reporting;
 mod sessions;

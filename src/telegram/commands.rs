@@ -7,6 +7,15 @@ pub(super) enum Command {
     Player(String),
     Game(String),
     Resume(SessionId),
+    Correct {
+        session: SessionId,
+        amounts: Vec<Cents>,
+        reason: String,
+    },
+    Void {
+        session: SessionId,
+        reason: String,
+    },
     Report(ReportCommand),
     Step {
         id: SessionId,
@@ -16,11 +25,24 @@ pub(super) enum Command {
 }
 
 pub(super) enum ReportCommand {
-    Leaderboard { page: u32 },
-    GameLeaderboard { game: GameId, page: u32 },
-    Player { player: PlayerId, page: u32 },
-    History { page: u32 },
-    Session { session: SessionId },
+    Leaderboard {
+        page: u32,
+    },
+    GameLeaderboard {
+        game: GameId,
+        page: u32,
+    },
+    Player {
+        player: PlayerId,
+        page: u32,
+    },
+    History {
+        page: u32,
+    },
+    Session {
+        session: SessionId,
+        after_revision: u64,
+    },
 }
 
 pub(super) enum Action {
@@ -45,9 +67,44 @@ pub(super) fn parse(update: &AuthorizedUpdate, bot_username: &str) -> Result<Com
         "/player" => Ok(Command::Player(value.to_owned())),
         "/game" => Ok(Command::Game(value.to_owned())),
         "/resume" => Ok(Command::Resume(SessionId::new(value)?)),
+        "/correct" => correction(value),
+        "/void" => void(value),
         "/step" | "/guest" => text_step(value, command == "/guest"),
         _ => report(command, value),
     }
+}
+
+fn correction(value: &str) -> Result<Command> {
+    let (values, reason) = audit_parts(value)?;
+    let mut values = values.split_whitespace();
+    let session = SessionId::new(values.next().ok_or(Error::Invalid)?)?;
+    let amounts = values.map(amount).collect::<Result<Vec<_>>>()?;
+    if amounts.is_empty() {
+        return Err(Error::Invalid);
+    }
+    Ok(Command::Correct {
+        session,
+        amounts,
+        reason: reason.to_owned(),
+    })
+}
+
+fn void(value: &str) -> Result<Command> {
+    let (value, reason) = audit_parts(value)?;
+    Ok(Command::Void {
+        session: SessionId::new(single_value(value)?)?,
+        reason: reason.to_owned(),
+    })
+}
+
+fn audit_parts(value: &str) -> Result<(&str, &str)> {
+    let (values, reason) = value.split_once('|').ok_or(Error::Invalid)?;
+    let values = values.trim();
+    let reason = reason.trim();
+    if values.is_empty() || reason.is_empty() {
+        return Err(Error::Invalid);
+    }
+    Ok((values, reason))
 }
 
 fn report(command: &str, value: &str) -> Result<Command> {
@@ -60,12 +117,27 @@ fn report(command: &str, value: &str) -> Result<Command> {
         "/history" => ReportCommand::History {
             page: optional_page(value)?,
         },
-        "/details" => ReportCommand::Session {
-            session: SessionId::new(single_value(value)?)?,
-        },
+        "/details" => return session_detail(value),
         _ => return Err(Error::Invalid),
     };
     Ok(Command::Report(report))
+}
+
+fn session_detail(value: &str) -> Result<Command> {
+    let mut values = value.split_whitespace();
+    let session = values.next().ok_or(Error::Invalid)?;
+    let after_revision = values
+        .next()
+        .map(|value| value.parse().map_err(|_| Error::Invalid))
+        .transpose()?
+        .unwrap_or_default();
+    if values.next().is_some() {
+        return Err(Error::Invalid);
+    }
+    Ok(Command::Report(ReportCommand::Session {
+        session: SessionId::new(session)?,
+        after_revision,
+    }))
 }
 
 fn game_leaderboard(value: &str) -> Result<Command> {

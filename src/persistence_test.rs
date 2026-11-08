@@ -10,8 +10,10 @@ use crate::domain::{
 };
 use crate::persistence::{
     d1::{D1Repository, DATABASE_BINDING},
-    ConfirmCommand, DraftState, Ledger, OwnerId, PersistenceError, PersistenceResult,
-    PersistentDraft, ReportPage, ReportPageRequest, ReportParticipantIdentity, Revision, UpdateKey,
+    AuditChange, AuditEntry, AuditKind, AuditPageRequest, AuditReason, AuditedSessionState,
+    ConfirmCommand, DraftState, ExportRequest, Ledger, OwnerId, PersistenceError,
+    PersistenceResult, PersistentDraft, ReportPage, ReportPageRequest, ReportParticipantIdentity,
+    Revision, UpdateKey,
 };
 
 #[derive(Deserialize)]
@@ -61,6 +63,11 @@ enum Command {
     },
     Details {
         id: String,
+        after_revision: Option<u64>,
+    },
+    Audit(AuditInput),
+    Export {
+        cursor: Option<String>,
     },
 }
 
@@ -124,8 +131,88 @@ async fn dispatch(command: Command, repository: &D1Repository) -> PersistenceRes
             Ok(report.map_or(Value::Null, player_report_json))
         }
         Command::History { page, size } => history(&ledger, page, size).await,
-        Command::Details { id } => details(&ledger, &id).await,
+        Command::Details { id, after_revision } => {
+            details(&ledger, &id, after_revision.unwrap_or_default()).await
+        }
+        Command::Audit(input) => audit(&ledger, input).await,
+        Command::Export { cursor } => {
+            let request = match cursor {
+                Some(cursor) => ExportRequest::resume(&cursor)?,
+                None => ExportRequest::first(),
+            };
+            let json = ledger.export_json(&request).await?;
+            serde_json::from_str(&json).map_err(|_| PersistenceError::Corrupt("test export json"))
+        }
     }
+}
+
+#[derive(Deserialize)]
+struct AuditInput {
+    key: String,
+    id: String,
+    actor: i64,
+    kind: String,
+    reason: String,
+    created_at: String,
+    #[serde(default)]
+    amounts: Vec<String>,
+}
+
+async fn audit(ledger: &Ledger<'_, D1Repository>, input: AuditInput) -> PersistenceResult<Value> {
+    let session = SessionId::new(&input.id)?;
+    let detail = ledger
+        .session_detail(&session, AuditPageRequest::new(0, 1)?)
+        .await?
+        .ok_or(PersistenceError::NotFound)?;
+    let key = UpdateKey::new(&input.key)?;
+    let actor = OwnerId::new(input.actor)?;
+    let reason = AuditReason::new(&input.reason)?;
+    let created_at = CreatedAt::parse(&input.created_at)?;
+    let change = match input.kind.as_str() {
+        "correction" => correction_change(
+            key,
+            session,
+            actor,
+            reason,
+            created_at,
+            detail.entries,
+            input.amounts,
+        )?,
+        "void" => AuditChange::void(key, session, actor, reason, created_at),
+        _ => return Err(PersistenceError::Corrupt("test audit kind")),
+    };
+    ledger.audit(&change).await?;
+    Ok(Value::Null)
+}
+
+fn correction_change(
+    key: UpdateKey,
+    session: SessionId,
+    actor: OwnerId,
+    reason: AuditReason,
+    created_at: CreatedAt,
+    entries: Vec<crate::persistence::SessionDetailEntry>,
+    amounts: Vec<String>,
+) -> PersistenceResult<AuditChange> {
+    if entries.len() != amounts.len() {
+        return Err(PersistenceError::InvalidAuditEntries);
+    }
+    let entries = entries
+        .into_iter()
+        .zip(amounts)
+        .map(|(entry, amount)| {
+            Ok(AuditEntry {
+                participant: entry.participant,
+                display_name: entry.display_name,
+                amount: Cents::new(
+                    amount
+                        .parse()
+                        .map_err(|_| PersistenceError::InvalidAuditEntries)?,
+                ),
+            })
+        })
+        .collect::<PersistenceResult<Vec<_>>>()?;
+    AuditChange::correction(key, session, actor, reason, created_at, entries)
 }
 
 async fn resume(
@@ -418,8 +505,17 @@ async fn history(
     Ok(page_json(&report, sessions))
 }
 
-async fn details(ledger: &Ledger<'_, D1Repository>, id: &str) -> PersistenceResult<Value> {
-    let detail = ledger.session_detail(&SessionId::new(id)?).await?;
+async fn details(
+    ledger: &Ledger<'_, D1Repository>,
+    id: &str,
+    after_revision: u64,
+) -> PersistenceResult<Value> {
+    let detail = ledger
+        .session_detail(
+            &SessionId::new(id)?,
+            AuditPageRequest::new(after_revision, 3)?,
+        )
+        .await?;
     Ok(detail.map_or(Value::Null, |detail| {
         let entries: Vec<_> = detail
             .entries
@@ -437,7 +533,21 @@ async fn details(ledger: &Ledger<'_, D1Repository>, id: &str) -> PersistenceResu
                 })
             })
             .collect();
-        json!({"session": session_summary_json(&detail.session), "entries": entries})
+        let state = match detail.state {
+            AuditedSessionState::Original => "original",
+            AuditedSessionState::Corrected => "corrected",
+            AuditedSessionState::Voided => "voided",
+        };
+        let audits: Vec<_> = detail.audits.items().iter().map(|audit| json!({
+            "revision": audit.revision,
+            "kind": match audit.kind { AuditKind::Correction => "correction", AuditKind::Void => "void" },
+            "actor": audit.actor.value().to_string(),
+            "reason": audit.reason.as_str(),
+            "created_at": audit.created_at.to_string(),
+        })).collect();
+        json!({"session": session_summary_json(&detail.session), "entries": entries,
+            "state": state, "audits": audits,
+            "next_after": detail.audits.next_after()})
     }))
 }
 
