@@ -36,14 +36,15 @@ harness calls the same production route, while normal Worker builds expose no te
 ## Authoritative D1 backup
 
 Before a destructive migration or recovery, identify the exact environment and database.
-Staging and production configuration do not exist yet, so the remote examples below are Phase 7
-procedures, not commands that currently work. They require explicit authorization.
+Private staging and production config generation is prepared in [deployment.md](deployment.md),
+but remote resources do not exist yet. The examples below require generated target configs,
+verified resources, and explicit authorization. They have not been executed remotely.
 
 1. Stop or otherwise exclude writes for the recovery window.
 2. Export the complete source database, including schema and operational tables:
 
    ```shell
-   pnpm exec wrangler d1 export LEDGER_DB --remote --env production --output backups/settlebot-YYYYMMDDTHHMMSSZ.sql
+   pnpm exec wrangler d1 export LEDGER_DB --remote --config .wrangler/production.json --output backups/settlebot-YYYYMMDDTHHMMSSZ.sql
    ```
 
 3. Record a SHA-256 checksum and store the SQL file in encrypted storage with access logging.
@@ -52,8 +53,11 @@ procedures, not commands that currently work. They require explicit authorizatio
 5. Restore the SQL export into that isolated target:
 
    ```shell
-   pnpm exec wrangler d1 execute RECOVERY_DB --remote --file backups/settlebot-YYYYMMDDTHHMMSSZ.sql
+   pnpm exec wrangler d1 execute RECOVERY_DB --remote --config .wrangler/recovery.json --file backups/settlebot-YYYYMMDDTHHMMSSZ.sql
    ```
+
+   The recovery config is separately prepared and reviewed; the deployment generator does not
+   create it. Its `RECOVERY_DB` binding must identify the new isolated target, never the source.
 
 6. Compare source and target counts for `players`, `games`, `sessions`, `session_entries`,
    `session_audits`, and `session_audit_entries`. Verify representative current leaderboards,
@@ -74,7 +78,7 @@ no remote backup or restore has been performed.
 - Apply migrations separately from Worker deployment with the exact environment selected:
 
   ```shell
-  pnpm exec wrangler d1 migrations apply LEDGER_DB --remote --env staging
+  pnpm exec wrangler d1 migrations apply LEDGER_DB --remote --config .wrangler/staging.json
   ```
 
 - Verify the migration table, health check, current reports, corrections, voids, and export in

@@ -2,7 +2,7 @@
 
 ## Project overview
 
-SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. Phases 0–5 are implemented and verified locally, and their implementation commits passed the validation-only GitHub Actions workflow. Nothing has been deployed or verified against live Telegram or remote D1.
+SettleBot is a serverless Telegram ledger for zero-sum group game settlements. Its foundation uses Rust compiled to WebAssembly for Cloudflare Workers, Cloudflare D1, and GitHub Actions. Phases 0–6 are implemented and passed local and GitHub Actions validation. Phase 7 configuration and workflows are in preparation with deployment disabled. Nothing has been deployed or verified against live Telegram or remote D1.
 
 ## Repository structure
 
@@ -32,9 +32,9 @@ Read [the implementation plan](agent_docs/implementation-plan.md) before impleme
 - **Phase 2 — Persistence (complete):** Versioned D1 migrations, persistent drafts, atomic session and idempotency writes, and real local D1 integration tests; all local and remote validation checks pass for implementation commit `8076d50`.
 - **Phase 3 — Authorized Telegram workflow (complete):** Webhook secret, designated group, and numeric admin checks before writes; revision-bound guided sessions and admin roster/game creation. Implementation commit `ef42b88` passed Actions run `41462136749`.
 - **Phase 4 — Resilience (complete):** Explicit input, participant, catalog, and page-size limits; atomic per-user throttling; bounded Telegram calls; retries restricted to idempotent rate admission; safe errors and redacted structured logs. Implementation commit `f830bc4` passed Actions run `41476300605`.
-- **Phase 5 — Reporting (complete):** Roster-only overall and per-game leaderboards, player and session drill-downs, exact dates, detail-only guest visibility, deterministic pagination, and bounded contribution batches. Implementation commit `53e6dea` passed Actions run `41482729510`; the batching remediation is verified locally but has no remote CI evidence until it is committed and pushed through the validation workflow.
-- **Phase 6 — Audit and recovery (outstanding; next):** Add audited corrections and voids, CSV or JSON export, backups, recovery verification, and operational documentation.
-- **Phase 7 — Delivery and operations (outstanding):** PR validation only; validated `main` commits deploy automatically to isolated staging; smoke tests and manual approval gate promotion of the same commit to production.
+- **Phase 5 — Reporting (complete):** Roster-only overall and per-game leaderboards, player and session drill-downs, exact dates, detail-only guest visibility, deterministic pagination, and bounded contribution batches. Implementation commit `53e6dea` passed Actions run `41482729510`; subsequent reporting remediation is also covered by successful Phase 6 CI run `42460091640`.
+- **Phase 6 — Audit and recovery (complete):** Audited corrections and voids, private JSON export, isolated local recovery verification, and operational documentation. Implementation commit `7c91f1f` passed Actions run `42460091640`.
+- **Phase 7 — Delivery and operations (in preparation):** Disabled release workflows and private environment configuration are prepared locally. Activation, external setup, deployment, smoke evidence, approval enforcement, monitoring, and rollback exercises remain outstanding.
 
 Remote CI above means only that GitHub-hosted validation passed. It is not evidence of a deployed Worker, remote migration, staging environment, production readiness, or live Telegram behavior.
 
@@ -53,6 +53,7 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 pnpm test:d1
+pnpm test:delivery
 pnpm build
 ```
 
@@ -151,5 +152,5 @@ When writing code, follow these steps in order:
 
 - Read `README.md` first for product requirements, architecture intent, operational goals, and privacy boundaries.
 - Then read [`agent_docs/implementation-plan.md`](agent_docs/implementation-plan.md) for status and testable completion gates.
-- TODO: Add focused documents such as `agent_docs/architecture.md`, `agent_docs/deployment.md`, and `agent_docs/recovery.md` only when verified implementation details exist.
+- See [delivery preparation](agent_docs/deployment.md) and [backup and recovery](agent_docs/recovery.md) for implemented tooling, disabled workflows, and separately authorized external operations.
 - If nested components later require different instructions, add a scoped `AGENTS.md` in that component; the nearest file takes precedence.

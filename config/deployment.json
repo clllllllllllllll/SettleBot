@@ -1,0 +1,19 @@
+{
+  "compatibility_date": "2026-10-14",
+  "workers_dev": true,
+  "preview_urls": false,
+  "no_bundle": true,
+  "find_additional_modules": true,
+  "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": false }],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": false }
+  },
+  "secrets": {
+    "required": [
+      "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_CHAT_ID", "TELEGRAM_ADMIN_IDS",
+      "TELEGRAM_BOT_USERNAME", "TELEGRAM_BOT_TOKEN", "EXPORT_SECRET"
+    ]
+  }
+}

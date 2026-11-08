@@ -30,12 +30,16 @@ async fn fetch(
     if request.uri().path() == export::EXPORT_PATH && request.method() == Method::GET {
         return export::response(request, environment).await;
     }
-    handle_request(request)
+    let release_sha = environment
+        .var("RELEASE_SHA")
+        .ok()
+        .map(|value| value.to_string());
+    handle_request(request, release_sha.as_deref())
 }
 
-fn handle_request<B>(request: Request<B>) -> Result<Response<String>> {
+fn handle_request<B>(request: Request<B>, release_sha: Option<&str>) -> Result<Response<String>> {
     if request.uri().path() == HEALTH_PATH && request.method() == Method::GET {
-        return health::response();
+        return health::response(release_sha);
     }
 
     Ok(Response::builder()

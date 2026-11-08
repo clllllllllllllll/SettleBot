@@ -2,13 +2,13 @@
 
 A production-minded serverless application built to demonstrate cloud architecture, automated delivery, secure operations, and cost-conscious system design.
 
-> **Status:** Phases 0–6 complete locally; not deployed
+> **Status:** Phases 0–6 validated; Phase 7 in preparation; not deployed
 >
 > **Stack:** Rust, Cloudflare Workers, Cloudflare D1
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–5 and the reporting batching remediation are on `main`; the Phase 0–5 implementation commits passed the validation-only GitHub Actions workflow. Phase 6 audit and recovery is implemented and verified locally but is not committed or remotely validated. The Telegram workflow has not been exercised against live Telegram or remote D1. The current CI workflow validates pull requests and `main`; it does not deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–6 are on `main`; Phase 6 commit `7c91f1f` passed [CI run 42460091640](https://github.com/clllllllllllllll/SettleBot/actions/runs/42460091640). Phase 7 configuration and workflows are in preparation, with deployment disabled in source. The Telegram workflow has not been exercised against live Telegram or remote D1. CI validates pull requests and `main`; it does not currently deploy.
 
 ## Overview
 
@@ -155,7 +155,7 @@ Apply migrations to the local development database before persistence developmen
 pnpm db:migrate:local
 ```
 
-The `local` Wrangler environment contains only a local placeholder database identity. No staging or production resources are configured. Remote migrations require a separately configured environment and explicit authorization.
+The `local` Wrangler environment contains only a local placeholder database identity. Remote environment configuration is generated from private IDs using the prepared [delivery tooling](agent_docs/deployment.md); no staging or production resources exist yet. Remote migrations require separate explicit authorization.
 
 Run the same validation stages used by CI:
 
@@ -164,10 +164,11 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 pnpm test:d1
+pnpm test:delivery
 pnpm build
 ```
 
-The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) exercise the same routing and response code as the Worker, verifying HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. `pnpm build` compiles the release Worker and performs a deployment dry run.
+The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) verify HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. Health responses use `no-store`; deployments configured with `RELEASE_SHA` also identify the commit in `X-SettleBot-Commit`. `pnpm build` compiles the release Worker and performs a deployment dry run.
 
 `pnpm test:d1` builds feature-gated Rust test modules and runs 37 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all five migrations, and checks persistence, Telegram authorization, guided flows, multi-batch reporting, correction/void lineage, audit rollback and snapshot consistency, portable export and isolated restore, rejected and oversized requests, throttling, concurrency, rollback, timeout/delivery replay, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
 
@@ -185,7 +186,7 @@ For local configuration, copy [.dev.vars.example](.dev.vars.example) to the igno
 - Static structured error logs without request or ledger data
 - Credentials and authorization configuration read from Worker secret bindings
 
-Phase 6 audit and recovery is locally verified only; remote CI, backup, restore, and live Telegram evidence do not exist. Phase 7 delivery and operations remains outstanding: secret provisioning, isolated remote environments, staging deployment/smoke tests, production approval, monitoring, and rollback verification do not exist. The repository is not production-ready or deployed.
+Phase 6 passed local and remote CI validation; remote backup, restore, and live Telegram evidence do not exist. Phase 7 has prepared artifact promotion, environment configuration, read-only smoke checks, and an [operations runbook](agent_docs/deployment.md), with release execution disabled. Secret provisioning, remote environments, deployment/smoke evidence, approval configuration, alerting, and rollback verification remain outstanding. The repository is not production-ready or deployed.
 
 ## Planned environments
 

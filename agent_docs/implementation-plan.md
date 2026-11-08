@@ -4,7 +4,7 @@ This is a plan, not a claim of implemented product capabilities. Read [README.md
 
 ## Current status
 
-Phases 0–6 are implemented and verified locally. The Phase 0–5 implementation commits are on `main` and passed the validation-only [CI workflow](../.github/workflows/ci.yml), which runs formatting, linting, native tests, local D1/workerd integration tests, and a production Worker build without deployment. The reporting batching remediation is also on `main`. Phase 6 is working-tree implementation with local evidence only and still requires a commit and successful CI run for remote validation. This evidence does not verify remote D1, a deployed Worker, remote backup/restore, staging or production configuration, or live Telegram. Phase 7 remains outstanding; delivery and external setup are not authorized by the Phase 6 implementation request.
+Phases 0–6 are implemented and verified locally and in GitHub Actions. Phase 6 commit `7c91f1f431b08670e713fb400a651b24729b13a7` passed [CI run 42460091640](https://github.com/clllllllllllllll/SettleBot/actions/runs/42460091640), including formatting, Clippy, native tests, local D1/workerd tests, and the production Worker dry run. This also validates the preceding reporting remediation. It does not verify remote D1, deployed Workers, remote backup/restore, or live Telegram. Phase 7 preparation is authorized; configuration and workflows are being prepared with deployment disabled. External setup and deployment are not authorized.
 
 ## Phase 0 — Foundation
 
@@ -153,7 +153,7 @@ Local checks passed on 2026-11-03 with the pinned toolchains:
 - `pnpm test:d1` — 37 passed after applying all five migrations to empty local D1 databases. Two Phase 6 cases verify numeric authorization, required reasons, rollback when the final Telegram receipt fails, original-row preservation, corrected aggregates, void exclusion, revision-cursor detail traversal within 4,096 characters, snapshot-consistent effective detail entries, a pre-correction report snapshot, production export authentication and `no-store`, bounded multi-chunk audit and catalog export with 24 active plus one inactive player, exclusion of catalog rows appended after the first chunk, a session at row ID 10,001, and restore into a second isolated D1 with matching record counts, totals, and all audit lineage.
 - `pnpm build` — release WebAssembly build and Wrangler deployment dry run succeeded; no deployment was performed.
 
-The tested operational procedure is documented in [recovery.md](recovery.md). No remote D1 export, restore, migration, secret change, live Telegram call, cloud resource, or deployment was performed. Phase 6 has no remote CI evidence yet.
+The tested operational procedure is documented in [recovery.md](recovery.md). Remote CI passed for Phase 6 implementation commit [`7c91f1f431b08670e713fb400a651b24729b13a7`](https://github.com/clllllllllllllll/SettleBot/commit/7c91f1f431b08670e713fb400a651b24729b13a7) in [run 42460091640](https://github.com/clllllllllllllll/SettleBot/actions/runs/42460091640), verified on 2026-11-08. All validation steps succeeded. No remote D1 export, restore, migration, secret change, live Telegram call, cloud resource, or deployment was performed.
 
 ## Phase 7 — Delivery and operations
 
@@ -162,4 +162,28 @@ The tested operational procedure is documented in [recovery.md](recovery.md). No
 - Control migrations separately with backward-compatible changes and a tested recovery path. Add monitoring, operational alerts, and Worker rollback procedures that explicitly do not restore D1 schema or data.
 - Gate: after explicit authorization for external setup/deployment, verify a PR cannot deploy, a failed `main` validation cannot deploy, staging failure blocks promotion, and production requires approval for the smoke-tested SHA. Record deployment/smoke evidence and a tested rollback/recovery exercise without secrets or private data.
 
-Phase 7 has not started. The current validation-only workflow, successful CI history, and local dry runs do not establish staging, production promotion, rollback, monitoring, remote migration safety, or production readiness.
+### Preparation status
+
+Phase 7 is in progress, limited to local configuration and workflow preparation. The prepared
+[CI](../.github/workflows/ci.yml) and [release workflow](../.github/workflows/release.yml) retain a
+validated SHA-bound artifact, serialize releases, deploy the same artifact to staging and
+production, and require staging smoke success before the protected production job. The release
+call is hard-disabled with a literal `false`; required reviewers and environment secrets must
+be configured and verified externally before authorized activation.
+
+The [configuration template](../config/deployment.json) and generator isolate named Workers and
+D1 bindings without tracked remote IDs. Read-only smoke checks validate the release header,
+authorization rejection, and D1 export. The [deployment runbook](deployment.md) documents setup,
+separate migrations, monitoring prerequisites, rollback, and outstanding acceptance evidence.
+No deployment, environment setting, secret, migration, alert, or webhook has been changed.
+
+Local preparation checks passed on 2026-11-08: Rustfmt, Clippy with warnings denied, 69 native
+tests, 37 D1/workerd regression tests, six delivery-tool tests, two packaged-Worker smoke tests,
+Actionlint 1.7.12, the production Worker build, and generated staging/production configuration
+dry runs with fake IDs. Packaged-Worker smoke failed before local schema setup and passed after
+local migrations, without creating ledger records or contacting Telegram. These Phase 7
+changes require successful remote CI validation in addition to this local evidence.
+
+Phase 7 remains incomplete until its external gates and operational exercises pass. Local tests
+and dry runs do not establish deployed staging, production approval enforcement, monitoring,
+remote recovery, or production readiness.

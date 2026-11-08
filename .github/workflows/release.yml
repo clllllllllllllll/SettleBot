@@ -1,0 +1,68 @@
+name: Release
+
+# No push, pull_request, workflow_run, or manual dispatch entry point.
+# Only CI calls this workflow, after validation; that call is disabled in source.
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      artifact_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  deployments: read
+
+jobs:
+  staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.sha == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/deploy
+        with:
+          target: staging
+          sha: ${{ inputs.sha }}
+          artifact_id: ${{ inputs.artifact_id }}
+          account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          staging_d1_id: ${{ secrets.STAGING_D1_ID }}
+          production_d1_id: ${{ secrets.PRODUCTION_D1_ID }}
+          worker_origin: ${{ secrets.WORKER_ORIGIN }}
+          export_secret: ${{ secrets.EXPORT_SECRET }}
+          github_token: ${{ github.token }}
+
+  production:
+    needs: staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.sha == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Required reviewers must be configured externally. The deploy action fails
+    # closed if that protection is absent or cannot be read.
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/deploy
+        with:
+          target: production
+          sha: ${{ inputs.sha }}
+          artifact_id: ${{ inputs.artifact_id }}
+          account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          staging_d1_id: ${{ secrets.STAGING_D1_ID }}
+          production_d1_id: ${{ secrets.PRODUCTION_D1_ID }}
+          worker_origin: ${{ secrets.WORKER_ORIGIN }}
+          export_secret: ${{ secrets.EXPORT_SECRET }}
+          github_token: ${{ github.token }}

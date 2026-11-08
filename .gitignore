@@ -1,6 +1,8 @@
 /target/
 /build/
 /dist/
+/.release/
+/backups/
 /node_modules/
 /.pnpm-store/
 /.wrangler/

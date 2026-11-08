@@ -11,6 +11,8 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -48,8 +50,46 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets
 
+      - name: Test delivery tooling without remote calls
+        run: pnpm test:delivery
+
       - name: Run local D1 integration tests
         run: pnpm test:d1
 
       - name: Build Worker
         run: pnpm build
+
+      - name: Package validated Worker
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: node scripts/release-artifact.mjs package "$RELEASE_SHA"
+
+      - name: Smoke packaged Worker against isolated local D1
+        run: pnpm test:release
+
+      - name: Retain validated Worker
+        id: artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: worker-${{ github.sha }}-${{ github.run_attempt }}
+          path: .release/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: validate
+    # Preparation only. Remove the literal false only after authorized external setup.
+    if: ${{ false && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    concurrency:
+      group: settlebot-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+    uses: ./.github/workflows/release.yml
+    with:
+      sha: ${{ github.sha }}
+      artifact_id: ${{ needs.validate.outputs.artifact_id }}

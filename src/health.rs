@@ -7,11 +7,15 @@ struct HealthResponse {
     status: &'static str,
 }
 
-pub fn response() -> Result<Response<String>> {
+pub fn response(release_sha: Option<&str>) -> Result<Response<String>> {
     let body = serde_json::to_string(&HealthResponse { status: "ok" })?;
 
-    Ok(Response::builder()
+    let mut response = Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, "application/json")
-        .body(body)?)
+        .header("Cache-Control", "no-store");
+    if let Some(sha) = release_sha {
+        response = response.header("X-SettleBot-Commit", sha);
+    }
+    Ok(response.body(body)?)
 }
