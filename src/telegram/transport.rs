@@ -41,6 +41,8 @@ pub(crate) async fn deliver(
         Ok(reply) => reply,
         Err(Error::Invalid | Error::Stale) => Reply::text(update.chat, recovery(&update.input)),
         Err(Error::Limit) => Reply::text(update.chat, limit_message()),
+        Err(Error::ReportCapacity) => Reply::text(update.chat,
+            "This report exceeds the supported ledger-history capacity. No partial totals are shown. Contact the operator; /history and /details remain available.".into()),
         Err(error) => return Err(error),
     };
     match transport.send(&reply).await {

@@ -15,6 +15,7 @@ use crate::persistence::{
 };
 
 use super::{decode_rows, records::corrupt, D1Repository};
+use crate::persistence::report_scan::{scan, BatchSource, REPORT_CONTRIBUTION_BATCH_SIZE};
 
 const REPORT_ROSTER: &str = "
     SELECT id AS player_id, display_name AS player_name FROM players ORDER BY id";
@@ -151,8 +152,6 @@ const SESSION_AUDITS: &str = "
 const SESSION_AUDIT_STATE: &str = "
     SELECT kind FROM session_audits WHERE session_id = ? ORDER BY revision DESC LIMIT 1";
 
-const REPORT_CONTRIBUTION_BATCH_SIZE: usize = 100;
-
 #[derive(Deserialize)]
 struct RosterRow {
     player_id: String,
@@ -242,6 +241,47 @@ fn snapshot_value(value: &str) -> PersistenceResult<i64> {
 struct ContributionCursor {
     player_id: String,
     session_id: String,
+}
+
+struct RosterContributions<'a> {
+    repository: &'a D1Repository,
+    snapshot: &'a ReportSnapshot,
+    game: Option<&'a GameId>,
+}
+
+impl BatchSource for RosterContributions<'_> {
+    type Cursor = ContributionCursor;
+    type Row = ContributionRow;
+    async fn next(&self, cursor: &ContributionCursor) -> PersistenceResult<Vec<ContributionRow>> {
+        match self.game {
+            Some(game) => {
+                self.repository
+                    .game_contribution_batch(game, self.snapshot, cursor)
+                    .await
+            }
+            None => {
+                self.repository
+                    .overall_contribution_batch(self.snapshot, cursor)
+                    .await
+            }
+        }
+    }
+}
+
+struct PlayerContributions<'a> {
+    repository: &'a D1Repository,
+    snapshot: &'a ReportSnapshot,
+    player: &'a PlayerId,
+}
+
+impl BatchSource for PlayerContributions<'_> {
+    type Cursor = String;
+    type Row = AmountRow;
+    async fn next(&self, cursor: &String) -> PersistenceResult<Vec<AmountRow>> {
+        self.repository
+            .player_contribution_batch(self.player, self.snapshot, cursor)
+            .await
+    }
 }
 
 #[derive(Deserialize)]
@@ -464,14 +504,12 @@ impl D1Repository {
         roster: &[RosterRow],
         snapshot: &ReportSnapshot,
     ) -> PersistenceResult<BTreeMap<PlayerId, ReportTotal>> {
-        let mut totals = empty_totals(roster)?;
-        let mut cursor = ContributionCursor::default();
-        loop {
-            let rows = self.overall_contribution_batch(snapshot, &cursor).await?;
-            if add_contribution_batch(&mut totals, &mut cursor, rows)? {
-                return Ok(totals);
-            }
-        }
+        let source = RosterContributions {
+            repository: self,
+            snapshot,
+            game: None,
+        };
+        scan(&source, empty_totals(roster)?, add_contribution_batch).await
     }
 
     async fn game_totals(
@@ -480,16 +518,12 @@ impl D1Repository {
         roster: &[RosterRow],
         snapshot: &ReportSnapshot,
     ) -> PersistenceResult<BTreeMap<PlayerId, ReportTotal>> {
-        let mut totals = empty_totals(roster)?;
-        let mut cursor = ContributionCursor::default();
-        loop {
-            let rows = self
-                .game_contribution_batch(game, snapshot, &cursor)
-                .await?;
-            if add_contribution_batch(&mut totals, &mut cursor, rows)? {
-                return Ok(totals);
-            }
-        }
+        let source = RosterContributions {
+            repository: self,
+            snapshot,
+            game: Some(game),
+        };
+        scan(&source, empty_totals(roster)?, add_contribution_batch).await
     }
 
     async fn player_total(
@@ -497,16 +531,12 @@ impl D1Repository {
         player: &PlayerId,
         snapshot: &ReportSnapshot,
     ) -> PersistenceResult<ReportTotal> {
-        let mut total = ReportTotal::default();
-        let mut cursor = String::new();
-        loop {
-            let rows = self
-                .player_contribution_batch(player, snapshot, &cursor)
-                .await?;
-            if add_amount_batch(&mut total, &mut cursor, rows)? {
-                return Ok(total);
-            }
-        }
+        let source = PlayerContributions {
+            repository: self,
+            snapshot,
+            player,
+        };
+        scan(&source, ReportTotal::default(), add_amount_batch).await
     }
 
     async fn finish_player_report(
@@ -850,8 +880,7 @@ fn add_contribution_batch(
     totals: &mut BTreeMap<PlayerId, ReportTotal>,
     cursor: &mut ContributionCursor,
     rows: Vec<ContributionRow>,
-) -> PersistenceResult<bool> {
-    let complete = rows.len() < REPORT_CONTRIBUTION_BATCH_SIZE;
+) -> PersistenceResult<()> {
     for row in rows {
         let (player, amount) = row.decode().map_err(corrupt)?;
         let total = totals
@@ -861,20 +890,19 @@ fn add_contribution_batch(
         cursor.player_id = row.player_id;
         cursor.session_id = row.session_id;
     }
-    Ok(complete)
+    Ok(())
 }
 
 fn add_amount_batch(
     total: &mut ReportTotal,
     cursor: &mut String,
     rows: Vec<AmountRow>,
-) -> PersistenceResult<bool> {
-    let complete = rows.len() < REPORT_CONTRIBUTION_BATCH_SIZE;
+) -> PersistenceResult<()> {
     for row in rows {
         total.add(decode_cents(&row.amount_cents)?)?;
         *cursor = row.session_id;
     }
-    Ok(complete)
+    Ok(())
 }
 
 fn next_snapshot(

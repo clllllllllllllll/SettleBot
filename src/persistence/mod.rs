@@ -4,6 +4,7 @@ mod audit;
 pub mod d1;
 mod error;
 mod export;
+pub(crate) mod report_scan;
 mod report_total;
 mod reporting;
 mod repositories;

@@ -7,7 +7,8 @@ pub(crate) const MAX_CALLBACK_ID_BYTES: usize = 128;
 pub(crate) const MAX_CATALOG_CHOICES: usize = 24;
 pub(crate) const MAX_REQUESTS_PER_WINDOW: u32 = 20;
 pub(crate) const RATE_WINDOW_SECONDS: i64 = 60;
-pub(crate) const SAFE_RETRY_ATTEMPTS: usize = 2;
+pub(crate) const SAFE_RETRY_ATTEMPTS: usize =
+    crate::persistence::report_scan::REPORT_ADMISSION_QUERIES;
 pub(crate) const TELEGRAM_TIMEOUT_SECONDS: u64 = 5;
 pub const MAX_PAGE_SIZE: usize = crate::persistence::MAX_REPORT_PAGE_SIZE;
 

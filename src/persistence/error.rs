@@ -10,6 +10,7 @@ pub enum PersistenceError {
     InvalidOwner,
     InvalidUpdateKey,
     InvalidPage,
+    ReportCapacity,
     InvalidAuditReason,
     InvalidAuditEntries,
     InvalidExportCursor,

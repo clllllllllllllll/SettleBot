@@ -36,6 +36,7 @@ pub enum Error {
     Stale,
     Limit,
     RateLimited,
+    ReportCapacity,
     Timeout,
     TelegramNetwork,
     TelegramAmbiguous,
@@ -59,6 +60,7 @@ impl From<PersistenceError> for Error {
         match error {
             PersistenceError::Storage | PersistenceError::Corrupt(_) => Self::Storage,
             PersistenceError::InvalidPage => Self::Limit,
+            PersistenceError::ReportCapacity => Self::ReportCapacity,
             _ => Self::Invalid,
         }
     }

@@ -15,7 +15,7 @@
     "export:ledger": "node scripts/export-ledger.mjs",
     "test:delivery": "node --test tests/delivery.test.mjs",
     "test:release": "node --test tests/release-worker.test.mjs",
-    "test:d1": "cargo install -q \"worker-build@0.8.7\" --locked && worker-build --release --out-dir build/d1-test --locked --features d1-test && node --test tests/d1.test.mjs tests/telegram.test.mjs tests/reporting.test.mjs tests/audit-recovery.test.mjs"
+    "test:d1": "cargo install -q \"worker-build@0.8.7\" --locked && worker-build --release --out-dir build/d1-test --locked --features d1-test && node --test tests/d1.test.mjs tests/telegram.test.mjs tests/reporting.test.mjs tests/report-capacity.test.mjs tests/audit-recovery.test.mjs"
   },
   "devDependencies": {
     "wrangler": "4.150.0"
