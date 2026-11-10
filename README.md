@@ -92,6 +92,11 @@ Administrators use `/player Name` and `/game Name` to create permanent catalog e
 
 ## Implemented resilience controls
 
+Authorized ordinary group text is acknowledged without admission, storage, or a reply, including
+while a draft is open. Slash commands and callbacks use the normal rate protection; unknown
+slash commands retain invalid-command guidance. Keep Telegram bot privacy mode enabled where
+practical, but input classification also protects groups where ordinary messages reach the bot.
+
 The webhook bounds request bodies, command text, callback data, display names, catalog creation/snapshots, participant selections, and report pages. Catalog creation stops at 24 active players or games, with D1 guards preserving the limit across concurrent requests. Report pages contain 10 rows, with validated limits of 50 rows and page 10,000. Authorized administrators are limited to 20 new update IDs per rolling minute; duplicate delivery of an admitted update remains replayable without consuming another slot, including after its original rate window expires.
 
 Outbound Telegram work has a five-second deadline. Telegram sends, workflow changes, and ledger writes are never retried inline because an ambiguous response could duplicate effects. Only idempotent rate-limit admission may retry, with at most two attempts. Static structured failure events contain a category and retryability only—never tokens, secrets, IDs, roster details, inputs, or amounts. See [Telegram resilience details](agent_docs/telegram.md#resilience-and-failure-handling).

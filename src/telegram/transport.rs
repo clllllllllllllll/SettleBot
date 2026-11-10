@@ -1,6 +1,22 @@
 use super::{auth::decode, handle, render::Reply, Clock, Configuration, Error, Repository, Result};
 use serde_json::{json, Value};
 
+pub(crate) async fn receive(
+    config: &Configuration,
+    secret: Option<&str>,
+    body: &[u8],
+    repository: &impl Repository,
+    clock: &impl Clock,
+    transport: &impl Transport,
+    limiter: &impl super::RateLimiter,
+) -> Result<Value> {
+    config.check_secret(secret)?;
+    if !super::worker::admit_update(config, body, limiter, clock).await? {
+        return Ok(json!({"ok": true}));
+    }
+    deliver(config, secret, body, repository, clock, transport).await
+}
+
 #[allow(async_fn_in_trait)]
 pub(crate) trait Transport {
     async fn send(&self, reply: &Reply) -> Result<()>;
@@ -16,6 +32,11 @@ pub(crate) async fn deliver(
 ) -> Result<Value> {
     config.check_secret(secret)?;
     let update = decode(config, body)?;
+    if super::commands::classify(&update, config.bot_username())?
+        == super::commands::InputKind::Ignore
+    {
+        return Ok(json!({"ok": true}));
+    }
     let reply = match handle(config, secret, body, repository, clock).await {
         Ok(reply) => reply,
         Err(Error::Invalid | Error::Stale) => Reply::text(update.chat, recovery(&update.input)),

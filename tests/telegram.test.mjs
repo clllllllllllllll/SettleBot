@@ -126,6 +126,29 @@ test("oversized webhook, text, callback, and display-name inputs are bounded wit
   assert.deepEqual(await snapshot(), before);
 });
 
+test("production admission and delivery ignore ordinary text even with an open draft", async () => {
+  for (const text of ["ordinary group conversation", "hello@OtherBot"]) {
+    const before = await snapshot();
+    const result = await success(message(text), { receive: true });
+    assert.deepEqual(result, { response: { ok: true }, messages: [] });
+    assert.deepEqual(await snapshot(), before);
+  }
+  const draft = await success(message("/session@SETTLEBOT"), { receive: true });
+  assert.match(draft.messages[0].text, /Session/);
+  const before = await snapshot();
+  assert.deepEqual((await success(message("another conversation"), { receive: true })).messages, []);
+  assert.deepEqual(await snapshot(), before, "open draft is untouched");
+  const invalid = message("/step");
+  const result = await success(invalid, { receive: true });
+  assert.equal(result.messages.length, 1, "malformed recognized command gets guidance");
+  assert.ok(await database.prepare("SELECT 1 FROM telegram_rate_events WHERE update_key = ?")
+    .bind(`telegram_${invalid.update_id}`).first(), "malformed command consumed admission");
+  const other = await snapshot();
+  assert.equal((await request(message("/session@OtherBot"), { receive: true })).error, "Rejected");
+  assert.equal((await request(message("plain text"), { receive: true, secret: "incorrect" })).error, "Unauthorized");
+  assert.deepEqual(await snapshot(), other);
+});
+
 test("per-user throttling is idempotent by update key and recovers after its rolling window", async () => {
   const replay = message("/session");
   await success(replay, { rate: true });

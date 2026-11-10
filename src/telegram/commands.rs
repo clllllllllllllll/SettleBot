@@ -55,6 +55,20 @@ pub(super) enum Action {
     Guest(String),
 }
 
+#[derive(Debug, PartialEq)]
+pub(super) enum InputKind {
+    Ignore,
+    Action,
+}
+
+pub(super) fn classify(update: &AuthorizedUpdate, bot_username: &str) -> Result<InputKind> {
+    if !update.callback && !update.input.trim_start().starts_with('/') {
+        return Ok(InputKind::Ignore);
+    }
+    validate_address(update, bot_username)?;
+    Ok(InputKind::Action)
+}
+
 pub(super) fn parse(update: &AuthorizedUpdate, bot_username: &str) -> Result<Command> {
     if update.callback {
         return callback(&update.input);

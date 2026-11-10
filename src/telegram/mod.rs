@@ -19,7 +19,11 @@ pub(crate) use rate::{admit_with_retry, RateLimitRequest, RateLimiter};
 pub(crate) use service::handle;
 pub use service::Clock;
 pub(crate) use store::{Change, Receipt, Repository, Transaction};
-pub(crate) use transport::{deliver, Transport};
+#[cfg(feature = "d1-test")]
+pub(crate) use transport::deliver;
+#[cfg(feature = "d1-test")]
+pub(crate) use transport::receive as transport_receive;
+pub(crate) use transport::Transport;
 
 use crate::{domain::DomainError, persistence::PersistenceError};
 

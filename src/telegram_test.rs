@@ -16,6 +16,8 @@ struct Input {
     #[serde(default)]
     deliver: bool,
     #[serde(default)]
+    receive: bool,
+    #[serde(default)]
     fail_send: bool,
     #[serde(default)]
     timeout_send: bool,
@@ -93,21 +95,34 @@ async fn execute(input: &str, environment: Env) -> Result<Value> {
         telegram::worker::admit_update(&config, &body, &repository, &clock).await?;
         return Ok(json!({"admitted": true}));
     }
-    if input.deliver {
+    if input.deliver || input.receive {
         let transport = TestTransport {
             fail: input.fail_send,
             timeout: input.timeout_send,
             messages: RefCell::new(Vec::new()),
         };
-        let response = telegram::deliver(
-            &config,
-            input.secret.as_deref(),
-            &body,
-            &repository,
-            &clock,
-            &transport,
-        )
-        .await?;
+        let response = if input.receive {
+            telegram::transport_receive(
+                &config,
+                input.secret.as_deref(),
+                &body,
+                &repository,
+                &clock,
+                &transport,
+                &repository,
+            )
+            .await?
+        } else {
+            telegram::deliver(
+                &config,
+                input.secret.as_deref(),
+                &body,
+                &repository,
+                &clock,
+                &transport,
+            )
+            .await?
+        };
         return Ok(json!({"response": response, "messages": transport.messages.into_inner()}));
     }
     let reply =

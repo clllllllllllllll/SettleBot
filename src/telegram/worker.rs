@@ -1,8 +1,7 @@
 //! Workers adapter. Sends are injected; callback acknowledgements use webhook replies.
 use super::{
     auth::{decode, SECRET_HEADER},
-    commands::validate_address,
-    deliver,
+    commands::{classify, InputKind},
     render::Reply,
     Clock, Configuration, Error, RateLimitRequest, Result, Transport,
 };
@@ -113,11 +112,19 @@ async fn process_body(
             .d1(DATABASE_BINDING)
             .map_err(|_| Error::Configuration)?,
     );
-    admit_update(config, body, &repository, &WorkerClock).await?;
     let transport = BotApi {
         token: secret_value(environment, BOT_TOKEN)?,
     };
-    let reply = deliver(config, secret, body, &repository, &WorkerClock, &transport).await?;
+    let reply = super::transport::receive(
+        config,
+        secret,
+        body,
+        &repository,
+        &WorkerClock,
+        &transport,
+        &repository,
+    )
+    .await?;
     serde_json::to_string(&reply).map_err(|_| Error::Storage)
 }
 
@@ -126,15 +133,18 @@ pub(crate) async fn admit_update(
     body: &[u8],
     limiter: &impl super::RateLimiter,
     clock: &impl Clock,
-) -> Result<()> {
+) -> Result<bool> {
     let update = decode(config, body)?;
-    validate_address(&update, config.bot_username())?;
+    if classify(&update, config.bot_username())? == InputKind::Ignore {
+        return Ok(false);
+    }
     let request = RateLimitRequest {
         key: update.key,
         owner: update.owner,
         now: clock.now()?,
     };
-    super::admit_with_retry(limiter, &request).await
+    super::admit_with_retry(limiter, &request).await?;
+    Ok(true)
 }
 
 fn configuration(environment: &Env) -> Result<Configuration> {

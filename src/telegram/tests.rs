@@ -370,6 +370,68 @@ fn callback_update(data: &str) -> Value {
         "is_bot": false}, "message": message()["message"], "data": data}})
 }
 
+struct CountingTransport(Cell<usize>);
+impl Transport for CountingTransport {
+    async fn send(&self, _: &render::Reply) -> Result<()> {
+        self.0.set(self.0.get() + 1);
+        Ok(())
+    }
+}
+
+#[test]
+fn unrelated_messages_bypass_admission_storage_and_delivery_after_authorization() {
+    let limiter = FailingLimiter::new(0);
+    let transport = CountingTransport(Cell::new(0));
+    for text in ["ordinary group text", "hello@OtherBot", "  "] {
+        let body = message_with_text(text);
+        assert_eq!(
+            run(transport::receive(
+                &config(),
+                Some("fake_secret"),
+                body.to_string().as_bytes(),
+                &NoAccess,
+                &FixedClock,
+                &transport,
+                &limiter
+            )),
+            Ok(json!({"ok": true}))
+        );
+    }
+    assert_eq!(limiter.calls.get(), 0);
+    assert_eq!(transport.0.get(), 0);
+}
+
+#[test]
+fn malformed_commands_and_callbacks_still_require_admission() {
+    let limiter = FailingLimiter::new(0);
+    let transport = CountingTransport(Cell::new(0));
+    for body in [
+        message_with_text("/step"),
+        message_with_text("/guest"),
+        message_with_text("/unknown"),
+        callback_update("malformed"),
+    ] {
+        assert!(run(transport::receive(
+            &config(),
+            Some("fake_secret"),
+            body.to_string().as_bytes(),
+            &NoAccess,
+            &FixedClock,
+            &transport,
+            &limiter
+        ))
+        .is_ok());
+    }
+    assert_eq!(limiter.calls.get(), 4);
+    assert_eq!(transport.0.get(), 4);
+}
+
+fn message_with_text(text: &str) -> Value {
+    let mut body = message();
+    body["message"]["text"] = json!(text);
+    body
+}
+
 fn rate_request() -> RateLimitRequest {
     RateLimitRequest {
         key: UpdateKey::new("telegram_1").unwrap(),
