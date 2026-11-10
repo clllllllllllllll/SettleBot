@@ -56,7 +56,8 @@ pub(crate) fn response(result: Result<String>) -> worker::Result<Response<String
             | Error::RateLimited
             | Error::TelegramRejected
             | Error::ReportCapacity
-            | Error::AuditStale,
+            | Error::AuditStale
+            | Error::AuditSyntax,
         ) => (StatusCode::OK, "{\"ok\":true}".into()),
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,

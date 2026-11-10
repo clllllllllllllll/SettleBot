@@ -232,6 +232,7 @@ fn http_errors_are_safe_and_retry_only_storage_or_configuration_failures() {
         (Error::Invalid, 200),
         (Error::Stale, 200),
         (Error::AuditStale, 200),
+        (Error::AuditSyntax, 200),
         (Error::Limit, 200),
         (Error::RateLimited, 200),
         (Error::Timeout, 503),
@@ -597,7 +598,7 @@ fn audit_commands_require_an_explicit_valid_revision() {
     ] {
         let update = decode(&config(), message_with_text(text).to_string().as_bytes()).unwrap();
         assert!(
-            matches!(parse(&update, "SettleBot"), Err(Error::Invalid)),
+            matches!(parse(&update, "SettleBot"), Err(Error::AuditSyntax)),
             "{text}"
         );
     }

@@ -89,7 +89,7 @@ test("authorized corrections and voids preserve originals and change current agg
   assert.equal((await sourceDatabase.prepare("SELECT COUNT(*) AS count FROM session_audits").first()).count, 0);
   assert.equal((await telegram("/correct session_one 0 +7.00 -6.00 | Does not balance")).error, "Invalid");
   assert.equal((await telegram("/correct session_one 0 +7.00 | Missing participant")).error, "Invalid");
-  assert.equal((await telegram("/void session_two 0 | ")).error, "Invalid");
+  assert.equal((await telegram("/void session_two 0 | ")).error, "AuditSyntax");
   assert.equal((await sourceDatabase.prepare("SELECT COUNT(*) AS count FROM session_audits").first()).count, 0);
 
   await sourceDatabase.prepare(`CREATE TRIGGER fail_audit_receipt BEFORE INSERT ON telegram_updates
@@ -260,6 +260,34 @@ test("void receipt storage failure rolls back the audit header and remains disti
   assert.equal((await auditCounts("void_rollback")).audits, 0);
   await sourceDatabase.prepare("DROP TRIGGER fail_void_receipt").run();
   assert.ok((await telegram("/void void_rollback 0 | Sample void")).ok);
+});
+
+test("legacy successful audit receipts replay after syntax changes without permitting new unversioned actions", async () => {
+  await saveAndConfirm("legacy", "2026-10-16", "500", "-500");
+  const recorded = [];
+  for (const [revision, kind] of ["correction", "void"].entries()) {
+    const text = kind === "correction" ? "/correct legacy +3.00 -3.00 | Legacy action" : "/void legacy | Legacy action";
+    const body = telegramMessage(text);
+    const key = `telegram_${body.update_id}`;
+    await success(sourceApi, { operation: "audit", key, id: "legacy", expected_revision: revision,
+      actor: 100, kind, reason: "Legacy action", created_at: created, amounts: kind === "correction" ? ["300", "-300"] : [] });
+    const reply = { method: "sendMessage", chat_id: -100, text: `Audited ${kind} saved for session legacy.`,
+      reply_markup: { inline_keyboard: [] } };
+    const fingerprint = JSON.stringify(["-100", "100", false, text]);
+    await sourceDatabase.prepare("INSERT INTO telegram_updates (update_key,fingerprint,response) VALUES (?,?,?)")
+      .bind(key, fingerprint, JSON.stringify(reply)).run();
+    recorded.push({ body, reply });
+  }
+  const before = await auditCounts("legacy");
+  for (const { body, reply } of recorded) {
+    const result = JSON.parse(await sourceApi.telegram(JSON.stringify({ secret: "fake_secret", body, created_at: created })));
+    assert.deepEqual(result.ok, reply);
+  }
+  assert.equal((await telegram("/void legacy | New unversioned action")).error, "AuditSyntax");
+  const forged = structuredClone(recorded[0].body); forged.message.text += " changed";
+  const rejected = JSON.parse(await sourceApi.telegram(JSON.stringify({ secret: "fake_secret", body: forged, created_at: created })));
+  assert.equal(rejected.error, "Rejected");
+  assert.deepEqual(await auditCounts("legacy"), before);
 });
 
 async function auditCounts(id) {

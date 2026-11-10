@@ -26,11 +26,14 @@ pub(crate) async fn handle<R: Repository, C: Clock>(
 ) -> Result<Reply> {
     config.check_secret(secret)?;
     let update = decode(config, body)?;
-    let command = match parse(&update, config.bot_username())? {
-        Command::Report(report) => {
+    let command = match parse(&update, config.bot_username()) {
+        Err(Error::AuditSyntax) => {
+            return replay(repository, &update).await?.ok_or(Error::AuditSyntax)
+        }
+        Ok(Command::Report(report)) => {
             return super::reporting::reply(repository, update.chat, report).await
         }
-        command => command,
+        command => command?,
     };
     if let Some(reply) = replay(repository, &update).await? {
         return Ok(reply);

@@ -35,6 +35,7 @@ pub enum Error {
     Invalid,
     Stale,
     AuditStale,
+    AuditSyntax,
     Limit,
     RateLimited,
     ReportCapacity,

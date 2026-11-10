@@ -39,7 +39,7 @@ pub(crate) async fn deliver(
     }
     let reply = match handle(config, secret, body, repository, clock).await {
         Ok(reply) => reply,
-        Err(Error::Invalid | Error::Stale) => Reply::text(update.chat, recovery(&update.input)),
+        Err(Error::Invalid | Error::Stale | Error::AuditSyntax) => Reply::text(update.chat, recovery(&update.input)),
         Err(Error::AuditStale) => Reply::text(update.chat,
             "That audit revision is stale or the session is voided. Reread /details SESSION_ID before correcting or voiding; voids cannot be restored.".into()),
         Err(Error::Limit) => Reply::text(update.chat, limit_message()),

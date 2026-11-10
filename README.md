@@ -144,6 +144,9 @@ Void is terminal for both commands; exact replay of a previously successful upda
 its original receipt. Revision and prior state are checked inside the atomic D1 mutation, including
 voids with no replacement entries. Receipt/storage failure rolls back the whole audit transaction.
 
+Successful receipts from the former audit syntax also remain replayable after authentication and
+exact fingerprint verification. New unversioned commands receive revision guidance without writes.
+
 Reports, histories, and details resolve audits by session revision, independently of insertion
 order after restore. Snapshot row IDs determine membership; the highest included revision wins.
 Voided details keep the last corrected amounts and complete revision lineage.

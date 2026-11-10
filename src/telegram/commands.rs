@@ -83,8 +83,8 @@ pub(super) fn parse(update: &AuthorizedUpdate, bot_username: &str) -> Result<Com
         "/player" => Ok(Command::Player(value.to_owned())),
         "/game" => Ok(Command::Game(value.to_owned())),
         "/resume" => Ok(Command::Resume(SessionId::new(value)?)),
-        "/correct" => correction(value),
-        "/void" => void(value),
+        "/correct" => correction(value).map_err(|_| Error::AuditSyntax),
+        "/void" => void(value).map_err(|_| Error::AuditSyntax),
         "/step" | "/guest" => text_step(value, command == "/guest"),
         _ => report(command, value),
     }
