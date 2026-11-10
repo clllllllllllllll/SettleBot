@@ -43,7 +43,11 @@ pub(crate) async fn deliver(
         Err(Error::Limit) => Reply::text(update.chat, limit_message()),
         Err(error) => return Err(error),
     };
-    transport.send(&reply).await?;
+    match transport.send(&reply).await {
+        Ok(()) => {}
+        Err(Error::TelegramRejected) => super::logging::record(&Error::TelegramRejected),
+        Err(error) => return Err(error),
+    }
     match update.callback_id {
         Some(id) => Ok(json!({"method": "answerCallbackQuery", "callback_query_id": id})),
         None => Ok(json!({"ok": true})),

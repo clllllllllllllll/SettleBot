@@ -315,7 +315,7 @@ test("different confirmation updates racing produce exactly one ledger session",
 test("delivery sends a typed reply and acknowledges callbacks; failed sends replay without ledger writes", async () => {
   const { reply } = await review();
   const update = callback(button(reply, "Confirm session"));
-  assert.equal((await request(update, { deliver: true, fail_send: true })).error, "Storage");
+  assert.equal((await request(update, { deliver: true, fail_send: true })).error, "TelegramNetwork");
   const persisted = await snapshot();
   assert.equal((await request(update, { deliver: true, timeout_send: true })).error, "Timeout");
   assert.deepEqual(await snapshot(), persisted, "timeout retry did not duplicate writes");
@@ -325,6 +325,34 @@ test("delivery sends a typed reply and acknowledges callbacks; failed sends repl
   assert.deepEqual(await snapshot(), persisted, "retry after send failure did not duplicate writes");
   const invalid = await success(message("/unknown"), { deliver: true });
   assert.match(invalid.messages[0].text, /Invalid or out-of-date/);
+});
+
+test("delivery classification chooses webhook results without repeating committed mutations", async () => {
+  const { reply } = await review();
+  const update = callback(button(reply, "Confirm session"));
+  const failure = (status, description, parameters) => ({ status,
+    body: JSON.stringify({ ok: false, error_code: status, description, parameters }) });
+  const cases = [
+    [{ fail_send: true }, 503], [{ timeout_send: true }, 503],
+    [{ send_response: failure(429, "Too Many Requests", { retry_after: 3 }) }, 503],
+    [{ send_response: failure(503, "Unavailable") }, 503],
+    [{ send_response: { status: 400, body: "unreadable" } }, 503],
+    [{ send_response: failure(400, "Bad Request: unknown future error") }, 503],
+    [{ send_response: failure(401, "Unauthorized") }, 503],
+    [{ send_response: failure(403, "Forbidden") }, 503],
+    [{ send_response: failure(400, "Bad Request: group migrated", { migrate_to_chat_id: -200 }) }, 503],
+    [{ send_response: failure(400, "Bad Request: message is too long") }, 200],
+    [{ send_response: { status: 200, body: JSON.stringify({ ok: true, result: { message_id: 1 } }) } }, 200],
+  ];
+  let persisted;
+  for (const [options, status] of cases) {
+    const result = await success(update, { deliver: true, delivery_http: true, ...options });
+    assert.equal(result.status, status);
+    assert.equal(result.messages.length, 1, "one send attempt per delivery");
+    if (status === 200) assert.equal(JSON.parse(result.body).method, "answerCallbackQuery");
+    persisted ??= await snapshot();
+    assert.deepEqual(await snapshot(), persisted, "receipt replay preserves ledger and workflow");
+  }
 });
 
 test("catalog creation stops at picker capacity and concurrent requests cannot exceed it", async () => {

@@ -49,7 +49,12 @@ pub(crate) fn response(result: Result<String>) -> worker::Result<Response<String
         Ok(body) => (StatusCode::OK, body),
         Err(Error::Unauthorized) => (StatusCode::FORBIDDEN, "{\"error\":\"Forbidden\"}".into()),
         Err(
-            Error::Rejected | Error::Invalid | Error::Stale | Error::Limit | Error::RateLimited,
+            Error::Rejected
+            | Error::Invalid
+            | Error::Stale
+            | Error::Limit
+            | Error::RateLimited
+            | Error::TelegramRejected,
         ) => (StatusCode::OK, "{\"ok\":true}".into()),
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -195,13 +200,13 @@ async fn send_request(request: worker::Request, signal: &AbortSignal) -> Result<
     let mut response = fetch
         .send_with_signal(signal)
         .await
-        .map_err(|_| Error::Telegram)?;
+        .map_err(|_| Error::TelegramNetwork)?;
     let status = response.status_code();
-    let result: ApiResponse = response.json().await.map_err(|_| Error::Telegram)?;
-    if status != StatusCode::OK.as_u16() || !result.ok {
-        return Err(Error::Telegram);
-    }
-    Ok(())
+    let body = response
+        .text()
+        .await
+        .map_err(|_| Error::TelegramAmbiguous)?;
+    super::bot_api::classify(status, body.as_bytes())
 }
 
 impl BotApi {
@@ -218,9 +223,4 @@ impl BotApi {
         let url = format!("{API_ORIGIN}/bot{}/sendMessage", self.token);
         worker::Request::new_with_init(&url, &init).map_err(|_| Error::Configuration)
     }
-}
-
-#[derive(serde::Deserialize)]
-struct ApiResponse {
-    ok: bool,
 }

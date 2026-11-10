@@ -1,5 +1,6 @@
 //! Authorized Telegram application boundary; platform I/O lives in `worker`.
 mod auth;
+pub(crate) mod bot_api;
 mod commands;
 pub(crate) mod flow;
 mod logging;
@@ -36,7 +37,12 @@ pub enum Error {
     Limit,
     RateLimited,
     Timeout,
-    Telegram,
+    TelegramNetwork,
+    TelegramAmbiguous,
+    TelegramRateLimited { retry_after: Option<u64> },
+    TelegramServer,
+    TelegramRejected,
+    TelegramAccess,
     Storage,
     Configuration,
 }

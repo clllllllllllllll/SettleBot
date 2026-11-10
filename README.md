@@ -101,6 +101,15 @@ The webhook bounds request bodies, command text, callback data, display names, c
 
 Outbound Telegram work has a five-second deadline. Telegram sends, workflow changes, and ledger writes are never retried inline because an ambiguous response could duplicate effects. Only idempotent rate-limit admission may retry, with at most two attempts. Static structured failure events contain a category and retryability only—never tokens, secrets, IDs, roster details, inputs, or amounts. See [Telegram resilience details](agent_docs/telegram.md#resilience-and-failure-handling).
 
+Telegram delivery classifies network failures, timeouts, rate limits (including `retry_after`),
+server failures, ambiguous responses, and configuration/access failures as HTTP 503. A confirmed
+permanent message rejection is logged with static redacted fields and acknowledged with HTTP 200,
+including callback acknowledgement. The ledger action may already be committed and its notification
+is lost. Sends have no inline retries; transient redelivery replays the committed receipt.
+Classification follows the [Bot API response contract](https://core.telegram.org/bots/api#making-requests)
+and [response parameters](https://core.telegram.org/bots/api#responseparameters); unrecognized 4xx
+responses remain ambiguous rather than discarding a potentially deliverable notification.
+
 ## Implemented reporting
 
 Authorized administrators can view overall and per-game roster leaderboards, a roster player's dated session results, chronological session history, and full details for one session. Overall and per-game rankings include permanent roster players, including zero-result players, and exclude one-time guests. Player and ordinary session histories also omit guest data; the relevant session's `/details` response is the only report that shows its guest identity and amount.

@@ -18,6 +18,9 @@ struct Input {
     #[serde(default)]
     receive: bool,
     #[serde(default)]
+    delivery_http: bool,
+    send_response: Option<SendResponse>,
+    #[serde(default)]
     fail_send: bool,
     #[serde(default)]
     timeout_send: bool,
@@ -42,21 +45,31 @@ impl Clock for TestClock {
 struct TestTransport {
     fail: bool,
     timeout: bool,
+    response: Option<SendResponse>,
     messages: RefCell<Vec<Value>>,
 }
 impl Transport for TestTransport {
     async fn send(&self, reply: &telegram::render::Reply) -> Result<()> {
+        self.messages
+            .borrow_mut()
+            .push(serde_json::to_value(reply).map_err(|_| Error::Storage)?);
         if self.fail {
-            return Err(Error::Storage);
+            return Err(Error::TelegramNetwork);
         }
         if self.timeout {
             return Err(Error::Timeout);
         }
-        self.messages
-            .borrow_mut()
-            .push(serde_json::to_value(reply).map_err(|_| Error::Storage)?);
+        if let Some(response) = &self.response {
+            return telegram::bot_api::classify(response.status, response.body.as_bytes());
+        }
         Ok(())
     }
+}
+
+#[derive(Deserialize)]
+struct SendResponse {
+    status: u16,
+    body: String,
 }
 
 #[wasm_bindgen::prelude::wasm_bindgen(
@@ -99,6 +112,7 @@ async fn execute(input: &str, environment: Env) -> Result<Value> {
         let transport = TestTransport {
             fail: input.fail_send,
             timeout: input.timeout_send,
+            response: input.send_response,
             messages: RefCell::new(Vec::new()),
         };
         let response = if input.receive {
@@ -111,7 +125,7 @@ async fn execute(input: &str, environment: Env) -> Result<Value> {
                 &transport,
                 &repository,
             )
-            .await?
+            .await
         } else {
             telegram::deliver(
                 &config,
@@ -121,8 +135,17 @@ async fn execute(input: &str, environment: Env) -> Result<Value> {
                 &clock,
                 &transport,
             )
-            .await?
+            .await
         };
+        if input.delivery_http {
+            let response = telegram::worker::response(response.map(|value| value.to_string()))
+                .map_err(|_| Error::Storage)?;
+            return Ok(
+                json!({"status": response.status().as_u16(), "body": response.body(),
+                "messages": transport.messages.into_inner()}),
+            );
+        }
+        let response = response?;
         return Ok(json!({"response": response, "messages": transport.messages.into_inner()}));
     }
     let reply =

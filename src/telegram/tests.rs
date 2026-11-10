@@ -231,7 +231,17 @@ fn http_errors_are_safe_and_retry_only_storage_or_configuration_failures() {
         (Error::Limit, 200),
         (Error::RateLimited, 200),
         (Error::Timeout, 503),
-        (Error::Telegram, 503),
+        (Error::TelegramNetwork, 503),
+        (Error::TelegramAmbiguous, 503),
+        (
+            Error::TelegramRateLimited {
+                retry_after: Some(4),
+            },
+            503,
+        ),
+        (Error::TelegramServer, 503),
+        (Error::TelegramAccess, 503),
+        (Error::TelegramRejected, 200),
         (Error::Storage, 503),
         (Error::Configuration, 503),
     ] {
@@ -438,6 +448,64 @@ fn rate_request() -> RateLimitRequest {
         owner: OwnerId::new(100).unwrap(),
         now: CreatedAt::parse("2026-11-01T16:00:00Z").unwrap(),
     }
+}
+
+#[test]
+fn bot_api_responses_are_classified_conservatively() {
+    for (status, body, expected) in [
+        (200, json!({"ok":true,"result":{"message_id":1}}), Ok(())),
+        (
+            400,
+            json!({"ok":false,"error_code":400,"description":"Bad Request: message is too long"}),
+            Err(Error::TelegramRejected),
+        ),
+        (
+            400,
+            json!({"ok":false,"error_code":400,"description":"new error"}),
+            Err(Error::TelegramAmbiguous),
+        ),
+        (
+            401,
+            json!({"ok":false,"error_code":401}),
+            Err(Error::TelegramAccess),
+        ),
+        (
+            429,
+            json!({"ok":false,"error_code":429,"parameters":{"retry_after":4}}),
+            Err(Error::TelegramRateLimited {
+                retry_after: Some(4),
+            }),
+        ),
+        (
+            429,
+            json!({"ok":false,"error_code":429}),
+            Err(Error::TelegramRateLimited { retry_after: None }),
+        ),
+        (
+            400,
+            json!({"ok":false,"error_code":400,"parameters":{"migrate_to_chat_id":-200}}),
+            Err(Error::TelegramAccess),
+        ),
+        (
+            400,
+            json!({"ok":false,"error_code":403}),
+            Err(Error::TelegramAmbiguous),
+        ),
+        (200, json!({"ok":true}), Err(Error::TelegramAmbiguous)),
+    ] {
+        assert_eq!(
+            bot_api::classify(status, body.to_string().as_bytes()),
+            expected
+        );
+    }
+    assert_eq!(
+        bot_api::classify(503, b"unreadable"),
+        Err(Error::TelegramServer)
+    );
+    assert_eq!(
+        bot_api::classify(400, b"unreadable"),
+        Err(Error::TelegramAmbiguous)
+    );
 }
 
 struct FailingLimiter {
