@@ -34,7 +34,7 @@ const OVERALL_CONTRIBUTIONS: &str = "
       FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
       JOIN sessions s ON s.id = a.session_id
       WHERE s.rowid <= CAST(?1 AS INTEGER) AND a.kind = 'correction'
-        AND a.rowid = (SELECT MAX(latest.rowid) FROM session_audits latest
+        AND a.revision = (SELECT MAX(latest.revision) FROM session_audits latest
           WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?2 AS INTEGER))
     )
     SELECT roster_player_id AS player_id, session_id,
@@ -55,7 +55,7 @@ const GAME_CONTRIBUTIONS: &str = "
       FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
       JOIN sessions s ON s.id = a.session_id
       WHERE s.game_id = ?1 AND s.rowid <= CAST(?2 AS INTEGER) AND a.kind = 'correction'
-        AND a.rowid = (SELECT MAX(latest.rowid) FROM session_audits latest
+        AND a.revision = (SELECT MAX(latest.revision) FROM session_audits latest
           WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?3 AS INTEGER))
     )
     SELECT roster_player_id AS player_id, session_id,
@@ -77,7 +77,7 @@ const PLAYER_CONTRIBUTIONS: &str = "
       FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
       JOIN sessions s ON s.id = a.session_id
       WHERE s.rowid <= CAST(?2 AS INTEGER) AND a.kind = 'correction'
-        AND a.rowid = (SELECT MAX(latest.rowid) FROM session_audits latest
+        AND a.revision = (SELECT MAX(latest.revision) FROM session_audits latest
           WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?3 AS INTEGER))
     )
     SELECT session_id, CAST(amount_cents AS TEXT) AS amount_cents FROM effective
@@ -91,8 +91,8 @@ const PLAYER_SESSIONS: &str = "
       UNION ALL
       SELECT e.roster_player_id, a.session_id, e.amount_cents
       FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
-      WHERE a.kind = 'correction' AND a.rowid = (
-        SELECT MAX(latest.rowid) FROM session_audits latest WHERE latest.session_id = a.session_id)
+      WHERE a.kind = 'correction' AND a.revision = (
+        SELECT MAX(latest.revision) FROM session_audits latest WHERE latest.session_id = a.session_id)
     )
     SELECT s.id AS session_id, games.display_name AS game_name,
            s.occurred_on, CAST(e.amount_cents AS TEXT) AS amount_cents
@@ -111,8 +111,8 @@ const PLAYER_SESSIONS_AT_SNAPSHOT: &str = "
       SELECT e.roster_player_id, a.session_id, e.amount_cents
       FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id
       JOIN sessions s ON s.id = a.session_id
-      WHERE s.rowid <= CAST(?2 AS INTEGER) AND a.kind = 'correction' AND a.rowid = (
-        SELECT MAX(latest.rowid) FROM session_audits latest
+      WHERE s.rowid <= CAST(?2 AS INTEGER) AND a.kind = 'correction' AND a.revision = (
+        SELECT MAX(latest.revision) FROM session_audits latest
         WHERE latest.session_id = a.session_id AND latest.rowid <= CAST(?3 AS INTEGER))
     )
     SELECT s.id AS session_id, games.display_name AS game_name,
@@ -125,7 +125,7 @@ const SESSION_HISTORY: &str = "
     SELECT sessions.id AS session_id, games.display_name AS game_name, sessions.occurred_on
     FROM sessions JOIN games ON games.id = sessions.game_id
     WHERE COALESCE((SELECT kind FROM session_audits
-      WHERE session_id = sessions.id ORDER BY rowid DESC LIMIT 1), 'original') <> 'void'
+      WHERE session_id = sessions.id ORDER BY revision DESC LIMIT 1), 'original') <> 'void'
     ORDER BY sessions.occurred_on DESC, sessions.id DESC
     LIMIT CAST(?1 AS INTEGER) OFFSET CAST(?2 AS INTEGER)";
 const SESSION_HEADER: &str = "
@@ -133,7 +133,7 @@ const SESSION_HEADER: &str = "
     FROM sessions JOIN games ON games.id = sessions.game_id WHERE sessions.id = ?";
 const SESSION_DETAIL_ENTRIES: &str = "
     WITH latest_correction AS (SELECT id FROM session_audits
-      WHERE session_id = ?1 AND kind = 'correction' ORDER BY rowid DESC LIMIT 1),
+      WHERE session_id = ?1 AND kind = 'correction' ORDER BY revision DESC LIMIT 1),
     effective AS (
       SELECT kind, identity_id, roster_player_id, guest_name, position, amount_cents
       FROM session_entries WHERE session_id = ?1 AND NOT EXISTS (SELECT 1 FROM latest_correction)
