@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { createTestHarness } from "wrangler";
+import { resolve } from "node:path";
 
 const server = createTestHarness({ workers: [{ configPath: "tests/wrangler.toml" }] });
 let api, database;
@@ -377,4 +378,20 @@ test("catalog creation stops at picker capacity and concurrent requests cannot e
     games += 1;
   }
   assert.equal(await rejected(message("/game Capacity Overflow")), "Limit");
+});
+
+test("real ingress ignores ordinary authorized text without database or outbound credentials", async () => {
+  const isolated = createTestHarness({ workers: [{ config: { name: "settlebot-ingress-only",
+    main: resolve("tests/worker.mjs"), compatibility_date: "2026-10-13",
+    vars: { TELEGRAM_WEBHOOK_SECRET: "fake_secret", TELEGRAM_CHAT_ID: "-100",
+      TELEGRAM_ADMIN_IDS: "100", TELEGRAM_BOT_USERNAME: "SettleBot" } } }] });
+  try {
+    await isolated.listen();
+    for (const [text, secret, status] of [["ordinary group text", "fake_secret", 200],
+      ["ordinary group text", "incorrect", 403], ["/session", "fake_secret", 503]]) {
+      const response = await isolated.fetch("https://example.test/telegram/webhook", { method: "POST",
+        headers: { "x-telegram-bot-api-secret-token": secret }, body: JSON.stringify(message(text)) });
+      assert.equal(response.status, status);
+    }
+  } finally { await isolated.close(); }
 });

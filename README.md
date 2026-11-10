@@ -92,6 +92,9 @@ Administrators use `/player Name` and `/game Name` to create permanent catalog e
 
 ## Implemented resilience controls
 
+Ingress classifies ordinary authorized text before resolving database and outbound credentials,
+so unrelated messages still receive HTTP 200 when delivery bindings are unavailable.
+
 Authorized ordinary group text is acknowledged without admission, storage, or a reply, including
 while a draft is open. Slash commands and callbacks use the normal rate protection; unknown
 slash commands retain invalid-command guidance. Keep Telegram bot privacy mode enabled where

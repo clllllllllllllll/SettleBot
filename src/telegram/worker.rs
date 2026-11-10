@@ -114,6 +114,9 @@ async fn process_body(
     body: &[u8],
     environment: &Env,
 ) -> Result<String> {
+    if classify(&decode(config, body)?, config.bot_username())? == InputKind::Ignore {
+        return Ok("{\"ok\":true}".into());
+    }
     let repository = D1Repository::new(
         environment
             .d1(DATABASE_BINDING)
