@@ -284,3 +284,29 @@ test("widened positive and negative report totals survive ordering, RPCs and Tel
     assert.equal((await commandSuccess({ operation: "player_report", player, page: 1, size: 10 })).total, expected);
   }
 });
+
+test("production overall and game aggregates preserve captured snapshots across append, correction and void", async () => {
+  const snapshot = (await commandSuccess({ operation: "report_snapshot" })).max_session_rowid;
+  const read = async (game, boundary) => commandSuccess({ operation: "leaderboard_at_snapshot",
+    game, page: 1, size: 50, max_session_rowid: boundary });
+  const previous = await Promise.all([read(null, snapshot), read("poker", snapshot)]);
+  await saveAndConfirm("board_snapshot_append", "poker", "2026-10-05", [
+    { kind: "roster", id: "batched", amount: "50" },
+    { kind: "guest", id: "counterparty", name: "Sample Guest", amount: "-50" },
+  ]);
+  await commandSuccess({ operation: "audit", key: "board_snapshot_correct", id: "batch_001",
+    actor: 100, kind: "correction", reason: "Sample correction", created_at: created, amounts: ["9", "-9"] });
+  await commandSuccess({ operation: "audit", key: "board_snapshot_void", id: "batch_100",
+    actor: 100, kind: "void", reason: "Sample void", created_at: created });
+  const currentSnapshot = (await commandSuccess({ operation: "report_snapshot" })).max_session_rowid;
+  for (const [index, game] of [null, "poker"].entries()) {
+    assert.deepEqual(await read(game, snapshot), previous[index], "old snapshot is immutable");
+    const current = await read(game, currentSnapshot);
+    const live = await commandSuccess({ operation: "leaderboard", game, page: 1, size: 50 });
+    assert.deepEqual(current, game ? live.page : live, "same production queries and aggregation");
+    const oldTotal = BigInt(previous[index].items.find(row => row.id === "batched").total);
+    assert.equal(current.items.find(row => row.id === "batched").total, (oldTotal + 58n).toString());
+    assert.ok(!JSON.stringify(current).includes("Sample Guest"));
+    assert.ok(!current.items.some(row => row.id === "counterparty"));
+  }
+});

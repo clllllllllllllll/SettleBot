@@ -51,6 +51,12 @@ enum Command {
         size: usize,
     },
     ReportSnapshot,
+    LeaderboardAtSnapshot {
+        game: Option<String>,
+        page: u32,
+        size: usize,
+        max_session_rowid: String,
+    },
     PlayerReportAtSnapshot {
         player: String,
         page: u32,
@@ -129,6 +135,22 @@ async fn dispatch(command: Command, repository: &D1Repository) -> PersistenceRes
                 )
                 .await?;
             Ok(report.map_or(Value::Null, player_report_json))
+        }
+        Command::LeaderboardAtSnapshot {
+            game,
+            page,
+            size,
+            max_session_rowid,
+        } => {
+            let game = game.map(|id| GameId::new(&id)).transpose()?;
+            let report = repository
+                .leaderboard_at_snapshot_for_test(
+                    game.as_ref(),
+                    ReportPageRequest::new(page, size)?,
+                    &max_session_rowid,
+                )
+                .await?;
+            Ok(leaderboard_page_json(report))
         }
         Command::History { page, size } => history(&ledger, page, size).await,
         Command::Details { id, after_revision } => {

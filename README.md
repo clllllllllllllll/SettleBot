@@ -124,6 +124,10 @@ overall/per-game report, or per player for `/stats`. Larger histories return a c
 reply with HTTP 200 and no partial totals; `/history` and `/details` remain available. This is
 a controlled limit, with no recent-history substitution or unlimited-history claim.
 
+Local regression tests exercise the production overall, per-game, and player aggregation at
+captured session/audit boundaries across multiple batches, later appends, corrections, and voids.
+Snapshot test hooks are compiled only with the `d1-test` feature.
+
 Authorized administrators can view overall and per-game roster leaderboards, a roster player's dated session results, chronological session history, and full details for one session. Overall and per-game rankings include permanent roster players, including zero-result players, and exclude one-time guests. Player and ordinary session histories also omit guest data; the relevant session's `/details` response is the only report that shows its guest identity and amount.
 
 Report queries use validated pages of 10 rows, cap page sizes at 50 and page numbers at 10,000, and sort with stable identity tie-breakers. Rankings order by total, display name, and player ID; histories order by the exact Asia/Singapore played date and session ID. Exact contribution totals are accumulated in checked widened integers from deterministic 100-row D1 batches. Captured session-row and audit-row boundaries keep each multi-batch report on one logical snapshot while bounding Worker memory; total scan work and latency still grow with matching ledger history. Reporting is read-only and creates no workflow receipt or ledger write. See [Telegram reporting commands](agent_docs/telegram.md#reporting-commands) and [persistence reporting rules](agent_docs/persistence.md#reporting-queries).

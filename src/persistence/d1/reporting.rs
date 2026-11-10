@@ -580,6 +580,22 @@ impl D1Repository {
     }
 
     #[cfg(feature = "d1-test")]
+    pub(crate) async fn leaderboard_at_snapshot_for_test(
+        &self,
+        game: Option<&GameId>,
+        request: ReportPageRequest,
+        snapshot: &str,
+    ) -> PersistenceResult<ReportPage<LeaderboardEntry>> {
+        let snapshot = ReportSnapshot::from_text(snapshot)?;
+        let roster = self.rows::<RosterRow>(REPORT_ROSTER, &[]).await?;
+        let totals = match game {
+            Some(game) => self.game_totals(game, &roster, &snapshot).await?,
+            None => self.overall_totals(&roster, &snapshot).await?,
+        };
+        leaderboard_page(roster, totals, request)
+    }
+
+    #[cfg(feature = "d1-test")]
     async fn player_report_head_at_snapshot(
         &self,
         player: &PlayerId,
