@@ -205,6 +205,7 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 pnpm test:d1
+pnpm test:recovery
 pnpm test:delivery
 pnpm build
 ```
@@ -216,6 +217,13 @@ The current Worker exposes `GET /health` as a minimal platform smoke check. Nati
 For local configuration, copy [.dev.vars.example](.dev.vars.example) to the ignored `.dev.vars` file and supply environment-specific values. The example is fake and cannot contact a real bot. Production and staging bindings, secrets, webhook configuration, and deployments remain separately authorized work.
 
 ## Operational controls
+
+`pnpm test:recovery` exercises pinned Wrangler's SQL export and execute commands using synthetic
+data and separate temporary local source/restore directories. It compares schema, migration
+metadata, all ledger/operational records, restored reports, audit lineage, draft resume, and
+receipt replay, then validates cleanup paths before deletion. Its temporary local bridge uses
+the feature-gated Rust test RPCs; normal builds exclude it. The portable JSON reconstruction
+test remains ledger-only and is not a supported operator importer. Remote recovery is unverified.
 
 - SGD amounts displayed in dollars and cents, and stored internally as integer cents for accuracy
 - Transactional session writes

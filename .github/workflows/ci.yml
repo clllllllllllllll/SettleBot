@@ -56,6 +56,9 @@ jobs:
       - name: Run local D1 integration tests
         run: pnpm test:d1
 
+      - name: Verify local SQL backup and isolated restore
+        run: pnpm test:recovery
+
       - name: Build Worker
         run: pnpm build
 
