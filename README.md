@@ -218,6 +218,10 @@ For local configuration, copy [.dev.vars.example](.dev.vars.example) to the igno
 
 ## Operational controls
 
+Builds and private configuration generation check that the production compatibility date matches
+across `wrangler.toml`, the deployment template, and generated environment configs. Production
+remains `2026-10-14`; isolated tests intentionally use the pinned workerd's `2026-10-13` override.
+
 The generic `pnpm deploy` Worker script has been removed. Builds remain dry runs. Deployment
 requires the reviewed environment-specific release path, whose workflow remains disabled until
 external setup and activation are separately authorized.

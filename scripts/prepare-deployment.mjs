@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { validateSha, verifyRelease } from "./release-artifact.mjs";
+import { checkCompatibility } from "./check-compatibility.mjs";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ACCOUNT = /^[a-f0-9]{32}$/i;
@@ -29,6 +30,7 @@ if (import.meta.main) {
     await verifyRelease(".release", sha);
     const template = JSON.parse(await readFile("config/deployment.json", "utf8"));
     const config = deploymentConfig(template, target, sha, process.env);
+    await checkCompatibility(config);
     await mkdir(".wrangler", { recursive: true });
     await writeFile(`.wrangler/${target}.json`, JSON.stringify(config, null, 2), { mode: 0o600 });
   } catch (error) {

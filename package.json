@@ -8,7 +8,7 @@
     "pnpm": "11.25.0"
   },
   "scripts": {
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "node scripts/check-compatibility.mjs && wrangler deploy --dry-run --outdir dist",
     "dev": "wrangler dev --env local",
     "db:migrate:local": "wrangler d1 migrations apply LEDGER_DB --local --env local",
     "export:ledger": "node scripts/export-ledger.mjs",

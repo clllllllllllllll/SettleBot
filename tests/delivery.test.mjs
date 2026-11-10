@@ -7,6 +7,7 @@ import { deploymentConfig } from "../scripts/prepare-deployment.mjs";
 import { packageRelease, verifyRelease } from "../scripts/release-artifact.mjs";
 import { smoke, smokeOrigin } from "../scripts/smoke.mjs";
 import { requireReviewers, verifyProductionGate } from "../scripts/check-production-gate.mjs";
+import { checkCompatibility, requireCompatibilityDate } from "../scripts/check-compatibility.mjs";
 
 const SHA = "1234567890abcdef1234567890abcdef12345678";
 const values = {
@@ -19,7 +20,7 @@ const template = JSON.parse(await readFile(new URL("../config/deployment.json", 
 test("package commands expose dry-run builds without a generic Worker deploy command", async () => {
   const { scripts } = JSON.parse(await readFile(new URL("../package.json", import.meta.url)));
   assert.equal(scripts.deploy, undefined);
-  assert.match(scripts.build, /^wrangler deploy --dry-run --outdir dist$/);
+  assert.match(scripts.build, /^node scripts\/check-compatibility.mjs && wrangler deploy --dry-run --outdir dist$/);
   const action = await readFile(new URL("../.github/actions/deploy/action.yml", import.meta.url), "utf8");
   assert.match(action, /wrangler deploy --config/);
 });
@@ -39,6 +40,19 @@ test("configuration isolates environments and rejects missing, shared, and place
   }
   assert.throws(() => deploymentConfig(template, "local", SHA, values));
   assert.throws(() => deploymentConfig(template, "staging", "main", values));
+});
+
+test("production build and generated compatibility dates agree while tests retain their override", async () => {
+  const generated = ["staging", "production"].map(target => deploymentConfig(template, target, SHA, values));
+  assert.equal(await checkCompatibility(...generated), "2026-10-14");
+  await assert.rejects(checkCompatibility({ ...generated[0], compatibility_date: "2026-10-13" }));
+  assert.throws(() => requireCompatibilityDate("2026-10-14", { compatibility_date: "2026-10-13" }));
+  assert.throws(() => requireCompatibilityDate(undefined, template));
+  assert.throws(() => requireCompatibilityDate("2026-10-14", {}));
+  for (const config of ["wrangler.toml", "wrangler-restore.toml"]) {
+    const text = await readFile(new URL(config, import.meta.url), "utf8");
+    assert.match(text, /compatibility_date = "2026-10-13"/);
+  }
 });
 
 test("artifact excludes stale Wasm files and rejects wrong commits, corruption, and extra files", async () => {
