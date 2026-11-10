@@ -16,6 +16,14 @@ const values = {
 };
 const template = JSON.parse(await readFile(new URL("../config/deployment.json", import.meta.url)));
 
+test("package commands expose dry-run builds without a generic Worker deploy command", async () => {
+  const { scripts } = JSON.parse(await readFile(new URL("../package.json", import.meta.url)));
+  assert.equal(scripts.deploy, undefined);
+  assert.match(scripts.build, /^wrangler deploy --dry-run --outdir dist$/);
+  const action = await readFile(new URL("../.github/actions/deploy/action.yml", import.meta.url), "utf8");
+  assert.match(action, /wrangler deploy --config/);
+});
+
 test("configuration isolates environments and rejects missing, shared, and placeholder IDs", () => {
   const staging = deploymentConfig(template, "staging", SHA, values);
   const production = deploymentConfig(template, "production", SHA, values);

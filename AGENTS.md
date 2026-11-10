@@ -69,7 +69,7 @@ Apply versioned migrations only to the local development database:
 pnpm db:migrate:local
 ```
 
-Rust 1.99.0, Node.js 24, pnpm 11.25.0, and the `wasm32-unknown-unknown` target are pinned by repository configuration. Windows development also requires Microsoft C++ Build Tools and the Windows SDK for host-side Rust build scripts. Do not run `pnpm deploy` without explicit authorization.
+Rust 1.99.0, Node.js 24, pnpm 11.25.0, and the `wasm32-unknown-unknown` target are pinned by repository configuration. Windows development also requires Microsoft C++ Build Tools and the Windows SDK for host-side Rust build scripts. There is no generic Worker deployment script; use only the reviewed environment-specific release path after explicit authorization.
 
 ## Role and objective
 

@@ -218,6 +218,10 @@ For local configuration, copy [.dev.vars.example](.dev.vars.example) to the igno
 
 ## Operational controls
 
+The generic `pnpm deploy` Worker script has been removed. Builds remain dry runs. Deployment
+requires the reviewed environment-specific release path, whose workflow remains disabled until
+external setup and activation are separately authorized.
+
 `pnpm test:recovery` exercises pinned Wrangler's SQL export and execute commands using synthetic
 data and separate temporary local source/restore directories. It compares schema, migration
 metadata, all ledger/operational records, restored reports, audit lineage, draft resume, and
