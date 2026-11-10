@@ -173,11 +173,12 @@ fn append_session(text: &mut String, session: &SessionSummary) {
 fn render_detail(detail: &SessionDetail) -> Result<String> {
     let session = &detail.session;
     let mut text = format!(
-        "Session {}\nGame: {}\nPlayed: {} (Asia/Singapore)\nState: {}",
+        "Session {}\nGame: {}\nPlayed: {} (Asia/Singapore)\nState: {}\nCurrent revision: {}",
         session.session_id.as_str(),
         session.game_name.as_str(),
         session.occurred_on,
         audit_state(detail.state),
+        detail.revision.value(),
     );
     append_detail_entries(&mut text, detail);
     append_audits(&mut text, detail);

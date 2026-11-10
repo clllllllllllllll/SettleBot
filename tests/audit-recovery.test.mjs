@@ -85,22 +85,22 @@ async function telegram(text, owner = 100) {
 }
 
 test("authorized corrections and voids preserve originals and change current aggregates", async () => {
-  assert.equal((await telegram("/correct session_one +7.00 -7.00 | Corrected score", 999)).error, "Rejected");
+  assert.equal((await telegram("/correct session_one 0 +7.00 -7.00 | Corrected score", 999)).error, "Rejected");
   assert.equal((await sourceDatabase.prepare("SELECT COUNT(*) AS count FROM session_audits").first()).count, 0);
-  assert.equal((await telegram("/correct session_one +7.00 -6.00 | Does not balance")).error, "Invalid");
-  assert.equal((await telegram("/correct session_one +7.00 | Missing participant")).error, "Invalid");
-  assert.equal((await telegram("/void session_two | ")).error, "Invalid");
+  assert.equal((await telegram("/correct session_one 0 +7.00 -6.00 | Does not balance")).error, "Invalid");
+  assert.equal((await telegram("/correct session_one 0 +7.00 | Missing participant")).error, "Invalid");
+  assert.equal((await telegram("/void session_two 0 | ")).error, "Invalid");
   assert.equal((await sourceDatabase.prepare("SELECT COUNT(*) AS count FROM session_audits").first()).count, 0);
 
   await sourceDatabase.prepare(`CREATE TRIGGER fail_audit_receipt BEFORE INSERT ON telegram_updates
     WHEN NEW.response LIKE '%Audited correction%' BEGIN SELECT RAISE(ABORT, 'injected audit receipt failure'); END`).run();
-  assert.equal((await telegram("/correct session_one +7.00 -7.00 | Corrected score")).error, "Storage");
+  assert.equal((await telegram("/correct session_one 0 +7.00 -7.00 | Corrected score")).error, "Storage");
   assert.equal((await sourceDatabase.prepare("SELECT COUNT(*) AS count FROM session_audits").first()).count, 0);
   await sourceDatabase.prepare("DROP TRIGGER fail_audit_receipt").run();
 
-  const correction = await telegram("/correct session_one +7.00 -7.00 | Corrected score");
+  const correction = await telegram("/correct session_one 0 +7.00 -7.00 | Corrected score");
   assert.match(correction.ok.text, /Audited correction saved/);
-  const voided = await telegram("/void session_two | Duplicate entry");
+  const voided = await telegram("/void session_two 0 | Duplicate entry");
   assert.match(voided.ok.text, /Audited void saved/);
 
   const original = await sourceDatabase.prepare(
@@ -133,6 +133,7 @@ test("authorized corrections and voids preserve originals and change current agg
     const amounts = revision === 10 ? ["600", "-600"] : ["700", "-700"];
     await success(sourceApi, {
       operation: "audit", key: `correction_${revision}`, id: "session_one", actor: 100,
+      expected_revision: revision - 1,
       kind: "correction", reason: longReason, created_at: created, amounts,
     });
   }
@@ -200,6 +201,74 @@ test("portable JSON backup restores ledger totals and audit lineage into an isol
     reason: "Corrected score", created_at: created,
   });
 });
+
+test("void is terminal, audit revisions are explicit, and exact successful updates replay", async () => {
+  await saveAndConfirm("terminal", "2026-10-13", "500", "-500");
+  const send = async body => JSON.parse(await sourceApi.telegram(JSON.stringify({
+    secret: "fake_secret", body, created_at: created,
+  })));
+  const correction = telegramMessage("/correct terminal 0 +3.00 -3.00 | Sample correction");
+  const [corrected, replayed] = await Promise.all([send(correction), send(correction)]);
+  assert.deepEqual(replayed, corrected, "same-key concurrent audit replays one receipt");
+  assert.ok(corrected.ok, corrected.error);
+  const voidCommand = telegramMessage("/void terminal 1 | Sample void");
+  const voided = await send(voidCommand);
+  assert.ok(voided.ok, voided.error);
+  const detail = await success(sourceApi, { operation: "details", id: "terminal" });
+  assert.equal(detail.state, "voided"); assert.equal(detail.revision, "2");
+  assert.deepEqual(detail.entries.map(entry => entry.amount), ["300", "-300"]);
+  const count = await auditCounts("terminal");
+  for (const text of ["/correct terminal 2 +1.00 -1.00 | No restore", "/void terminal 2 | No second void",
+    "/correct session_one 0 +1.00 -1.00 | Stale", "/void session_one 0 | Stale"]) {
+    assert.equal((await telegram(text)).error, "AuditStale");
+  }
+  assert.deepEqual(await send(correction), corrected, "older successful command still replays");
+  assert.deepEqual(await send(voidCommand), voided);
+  assert.deepEqual(await auditCounts("terminal"), count);
+  assert.match((await telegram("/details terminal")).ok.text, /Current revision: 2/);
+  const oldSyntax = JSON.parse(await sourceApi.telegram(JSON.stringify({ secret: "fake_secret",
+    body: telegramMessage("/void terminal | Old syntax"), created_at: created, deliver: true })));
+  assert.match(oldSyntax.ok.messages[0].text, /SESSION_ID REVISION/);
+});
+
+test("prepared audit races enforce expected revision inside the transaction including entryless voids", async () => {
+  for (const [label, leftKind, rightKind] of [["cc", "correction", "correction"],
+    ["cv", "correction", "void"], ["vv", "void", "void"]]) {
+    const id = `race_${label}`;
+    await saveAndConfirm(id, "2026-10-14", "500", "-500");
+    const input = (side, kind) => ({ key: `race_${label}_${side}`, id, expected_revision: 0, actor: 100,
+      kind, reason: `Sample ${side}`, created_at: created, amounts: kind === "correction" ? ["200", "-200"] : [] });
+    const results = await success(sourceApi, { operation: "audit_race", left: input("left", leftKind), right: input("right", rightKind) });
+    assert.deepEqual(results.toSorted(), ["Err(AuditStale)", "Ok(())"]);
+    const counts = await auditCounts(id);
+    assert.equal(counts.audits, 1); assert.equal(counts.receipts, 1);
+    const detail = await success(sourceApi, { operation: "details", id });
+    assert.equal(detail.revision, "1");
+    assert.equal(counts.entries, detail.state === "voided" ? 0 : 2);
+    const original = await sourceDatabase.prepare("SELECT CAST(amount_cents AS TEXT) AS amount FROM session_entries WHERE session_id = ? ORDER BY position").bind(id).all();
+    assert.deepEqual(original.results.map(row => row.amount), ["500", "-500"]);
+    assert.deepEqual(detail.entries.map(row => row.id), ["alpha", "beta"]);
+    assert.equal(detail.audits[0].actor, "100");
+  }
+});
+
+test("void receipt storage failure rolls back the audit header and remains distinct from stale state", async () => {
+  await saveAndConfirm("void_rollback", "2026-10-15", "100", "-100");
+  await sourceDatabase.prepare(`CREATE TRIGGER fail_void_receipt BEFORE INSERT ON telegram_updates
+    WHEN NEW.response LIKE '%Audited void%' BEGIN SELECT RAISE(ABORT, 'injected void receipt failure'); END`).run();
+  assert.equal((await telegram("/void void_rollback 0 | Sample void")).error, "Storage");
+  assert.equal((await auditCounts("void_rollback")).audits, 0);
+  await sourceDatabase.prepare("DROP TRIGGER fail_void_receipt").run();
+  assert.ok((await telegram("/void void_rollback 0 | Sample void")).ok);
+});
+
+async function auditCounts(id) {
+  return sourceDatabase.prepare(`SELECT
+    (SELECT COUNT(*) FROM session_audits WHERE session_id = ?1) AS audits,
+    (SELECT COUNT(*) FROM session_audit_entries e JOIN session_audits a ON a.id = e.audit_id WHERE a.session_id = ?1) AS entries,
+    (SELECT COUNT(*) FROM telegram_updates t JOIN session_audits a ON a.id = t.update_key WHERE a.session_id = ?1) AS receipts`)
+    .bind(id).first();
+}
 
 async function exportHttp(token, cursor) {
   const result = JSON.parse(await sourceApi.telegram(JSON.stringify({

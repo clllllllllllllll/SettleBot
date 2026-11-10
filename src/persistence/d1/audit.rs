@@ -1,15 +1,30 @@
 use worker::{D1PreparedStatement, D1Type::Null, D1Type::Text};
 
-use crate::persistence::{AuditChange, AuditKind, AuditRepository, PersistenceResult};
+use crate::persistence::{
+    AuditChange, AuditKind, AuditRepository, AuditTarget, PersistenceError, PersistenceResult,
+};
 
 use super::D1Repository;
 
 const ADD_AUDIT: &str = "
     INSERT INTO session_audits
         (id, session_id, revision, kind, actor_id, reason, created_at)
-    VALUES (?1, (SELECT id FROM sessions WHERE id = ?2),
-        COALESCE((SELECT MAX(revision) + 1 FROM session_audits WHERE session_id = ?2), 1),
+    VALUES (?1, (SELECT id FROM sessions WHERE id = ?2
+        AND COALESCE((SELECT MAX(revision) FROM session_audits WHERE session_id = ?2), 0) = CAST(?7 AS INTEGER)
+        AND COALESCE((SELECT kind FROM session_audits WHERE session_id = ?2 ORDER BY revision DESC LIMIT 1), 'original') = ?8
+        AND ?8 != 'void'),
+        CAST(?7 AS INTEGER) + 1,
         ?3, ?4, ?5, ?6)";
+const AUDIT_PRECONDITION: &str = "
+    SELECT EXISTS (SELECT 1 FROM sessions WHERE id = ?1
+      AND COALESCE((SELECT MAX(revision) FROM session_audits WHERE session_id = ?1), 0) = CAST(?2 AS INTEGER)
+      AND COALESCE((SELECT kind FROM session_audits WHERE session_id = ?1 ORDER BY revision DESC LIMIT 1), 'original') = ?3
+      AND ?3 != 'void') AS valid";
+
+#[derive(serde::Deserialize)]
+struct PreconditionRow {
+    valid: u8,
+}
 const ADD_AUDIT_ENTRY: &str = "
     INSERT INTO session_audit_entries
         (audit_id, kind, identity_id, roster_player_id, guest_name, position, amount_cents)
@@ -17,12 +32,41 @@ const ADD_AUDIT_ENTRY: &str = "
 
 impl AuditRepository for D1Repository {
     async fn commit_audit(&self, change: &AuditChange) -> PersistenceResult<()> {
-        self.batch(self.audit_statements(change)?).await?;
-        Ok(())
+        match self.batch(self.audit_statements(change)?).await {
+            Ok(_) => Ok(()),
+            Err(error) => Err(self.audit_failure(change, error).await),
+        }
     }
 }
 
 impl D1Repository {
+    pub(crate) async fn audit_failure(
+        &self,
+        change: &AuditChange,
+        failure: PersistenceError,
+    ) -> PersistenceError {
+        match self.audit_precondition_matches(&change.target).await {
+            Ok(false) => PersistenceError::AuditConflict,
+            _ => failure,
+        }
+    }
+
+    async fn audit_precondition_matches(&self, target: &AuditTarget) -> PersistenceResult<bool> {
+        let revision = target.revision().value().to_string();
+        let rows = self
+            .rows::<PreconditionRow>(
+                AUDIT_PRECONDITION,
+                &[
+                    Text(target.session_id().as_str()),
+                    Text(&revision),
+                    Text(target.prior_kind()),
+                ],
+            )
+            .await?;
+        rows.first()
+            .map(|row| row.valid != 0)
+            .ok_or(PersistenceError::Corrupt("audit precondition"))
+    }
     pub(crate) fn audit_statements(
         &self,
         change: &AuditChange,
@@ -40,17 +84,18 @@ impl D1Repository {
     ) -> PersistenceResult<D1PreparedStatement> {
         let actor = change.actor.value().to_string();
         let created_at = change.created_at.to_string();
-        self.statement(
-            ADD_AUDIT,
-            &[
-                Text(change.key.as_str()),
-                Text(change.session_id.as_str()),
-                Text(change.kind.as_str()),
-                Text(&actor),
-                Text(change.reason.as_str()),
-                Text(&created_at),
-            ],
-        )
+        let revision = change.target.revision().value().to_string();
+        let values = [
+            Text(change.key.as_str()),
+            Text(change.target.session_id().as_str()),
+            Text(change.kind.as_str()),
+            Text(&actor),
+            Text(change.reason.as_str()),
+            Text(&created_at),
+            Text(&revision),
+            Text(change.target.prior_kind()),
+        ];
+        self.statement(ADD_AUDIT, &values)
     }
 
     fn audit_entry_statements(

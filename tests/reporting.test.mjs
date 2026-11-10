@@ -295,9 +295,9 @@ test("production overall and game aggregates preserve captured snapshots across 
     { kind: "guest", id: "counterparty", name: "Sample Guest", amount: "-50" },
   ]);
   await commandSuccess({ operation: "audit", key: "board_snapshot_correct", id: "batch_001",
-    actor: 100, kind: "correction", reason: "Sample correction", created_at: created, amounts: ["9", "-9"] });
+    expected_revision: 0, actor: 100, kind: "correction", reason: "Sample correction", created_at: created, amounts: ["9", "-9"] });
   await commandSuccess({ operation: "audit", key: "board_snapshot_void", id: "batch_100",
-    actor: 100, kind: "void", reason: "Sample void", created_at: created });
+    expected_revision: 0, actor: 100, kind: "void", reason: "Sample void", created_at: created });
   const currentSnapshot = (await commandSuccess({ operation: "report_snapshot" })).max_session_rowid;
   for (const [index, game] of [null, "poker"].entries()) {
     assert.deepEqual(await read(game, snapshot), previous[index], "old snapshot is immutable");

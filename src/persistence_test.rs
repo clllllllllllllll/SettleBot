@@ -10,10 +10,10 @@ use crate::domain::{
 };
 use crate::persistence::{
     d1::{D1Repository, DATABASE_BINDING},
-    AuditChange, AuditEntry, AuditKind, AuditPageRequest, AuditReason, AuditedSessionState,
-    ConfirmCommand, DraftState, ExportRequest, Ledger, OwnerId, PersistenceError,
-    PersistenceResult, PersistentDraft, ReportPage, ReportPageRequest, ReportParticipantIdentity,
-    Revision, UpdateKey,
+    AuditChange, AuditEntry, AuditKind, AuditPageRequest, AuditReason, AuditRevision, AuditTarget,
+    AuditedSessionState, ConfirmCommand, DraftState, ExportRequest, Ledger, OwnerId,
+    PersistenceError, PersistenceResult, PersistentDraft, ReportPage, ReportPageRequest,
+    ReportParticipantIdentity, Revision, UpdateKey,
 };
 
 #[derive(Deserialize)]
@@ -72,6 +72,10 @@ enum Command {
         after_revision: Option<u64>,
     },
     Audit(AuditInput),
+    AuditRace {
+        left: AuditInput,
+        right: AuditInput,
+    },
     Export {
         cursor: Option<String>,
     },
@@ -157,6 +161,7 @@ async fn dispatch(command: Command, repository: &D1Repository) -> PersistenceRes
             details(&ledger, &id, after_revision.unwrap_or_default()).await
         }
         Command::Audit(input) => audit(&ledger, input).await,
+        Command::AuditRace { left, right } => audit_race(&ledger, repository, left, right).await,
         Command::Export { cursor } => {
             let request = match cursor {
                 Some(cursor) => ExportRequest::resume(&cursor)?,
@@ -172,6 +177,7 @@ async fn dispatch(command: Command, repository: &D1Repository) -> PersistenceRes
 struct AuditInput {
     key: String,
     id: String,
+    expected_revision: u64,
     actor: i64,
     kind: String,
     reason: String,
@@ -181,6 +187,40 @@ struct AuditInput {
 }
 
 async fn audit(ledger: &Ledger<'_, D1Repository>, input: AuditInput) -> PersistenceResult<Value> {
+    let change = prepare_audit(ledger, input).await?;
+    ledger.audit(&change).await?;
+    Ok(Value::Null)
+}
+
+async fn audit_race(
+    ledger: &Ledger<'_, D1Repository>,
+    repository: &D1Repository,
+    left: AuditInput,
+    right: AuditInput,
+) -> PersistenceResult<Value> {
+    let left = audit_transaction(prepare_audit(ledger, left).await?);
+    let right = audit_transaction(prepare_audit(ledger, right).await?);
+    let (left, right) = futures_util::future::join(
+        crate::telegram::Repository::apply(repository, &left),
+        crate::telegram::Repository::apply(repository, &right),
+    )
+    .await;
+    Ok(json!([format!("{left:?}"), format!("{right:?}")]))
+}
+
+fn audit_transaction(change: AuditChange) -> crate::telegram::Transaction {
+    crate::telegram::Transaction {
+        key: change.key.clone(),
+        fingerprint: change.key.as_str().to_owned(),
+        change: crate::telegram::Change::Audit(change),
+        reply: crate::telegram::render::Reply::text(-100, "Test audit receipt".into()),
+    }
+}
+
+async fn prepare_audit(
+    ledger: &Ledger<'_, D1Repository>,
+    input: AuditInput,
+) -> PersistenceResult<AuditChange> {
     let session = SessionId::new(&input.id)?;
     let detail = ledger
         .session_detail(&session, AuditPageRequest::new(0, 1)?)
@@ -190,26 +230,26 @@ async fn audit(ledger: &Ledger<'_, D1Repository>, input: AuditInput) -> Persiste
     let actor = OwnerId::new(input.actor)?;
     let reason = AuditReason::new(&input.reason)?;
     let created_at = CreatedAt::parse(&input.created_at)?;
+    let target = AuditTarget::at_revision(&detail, AuditRevision::new(input.expected_revision)?)?;
     let change = match input.kind.as_str() {
         "correction" => correction_change(
             key,
-            session,
+            target,
             actor,
             reason,
             created_at,
             detail.entries,
             input.amounts,
         )?,
-        "void" => AuditChange::void(key, session, actor, reason, created_at),
+        "void" => AuditChange::void(key, target, actor, reason, created_at),
         _ => return Err(PersistenceError::Corrupt("test audit kind")),
     };
-    ledger.audit(&change).await?;
-    Ok(Value::Null)
+    Ok(change)
 }
 
 fn correction_change(
     key: UpdateKey,
-    session: SessionId,
+    target: AuditTarget,
     actor: OwnerId,
     reason: AuditReason,
     created_at: CreatedAt,
@@ -234,7 +274,7 @@ fn correction_change(
             })
         })
         .collect::<PersistenceResult<Vec<_>>>()?;
-    AuditChange::correction(key, session, actor, reason, created_at, entries)
+    AuditChange::correction(key, target, actor, reason, created_at, entries)
 }
 
 async fn resume(
@@ -568,7 +608,7 @@ async fn details(
             "created_at": audit.created_at.to_string(),
         })).collect();
         json!({"session": session_summary_json(&detail.session), "entries": entries,
-            "state": state, "audits": audits,
+            "state": state, "revision": detail.revision.value().to_string(), "audits": audits,
             "next_after": detail.audits.next_after()})
     }))
 }

@@ -12,7 +12,8 @@ mod types;
 mod use_cases;
 
 pub use audit::{
-    AuditChange, AuditEntry, AuditKind, AuditReason, AuditRepository, MAX_AUDIT_REASON_CHARS,
+    AuditChange, AuditEntry, AuditKind, AuditReason, AuditRepository, AuditRevision, AuditTarget,
+    MAX_AUDIT_REASON_CHARS,
 };
 pub use error::{PersistenceError, PersistenceResult};
 pub use export::{

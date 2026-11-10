@@ -9,7 +9,8 @@ use crate::domain::{
     CreatedAt, DisplayName, Game, GameId, Player, PlayerId, RosterStatus, SessionId,
 };
 use crate::persistence::{
-    AuditChange, AuditEntry, AuditPageRequest, AuditReason, OwnerId, Revision,
+    AuditChange, AuditEntry, AuditPageRequest, AuditReason, AuditRevision, AuditTarget, OwnerId,
+    Revision,
 };
 
 pub trait Clock {
@@ -90,12 +91,20 @@ async fn prepare<R: Repository, C: Clock>(
         Command::Game(name) => add_game(repository, update.number, &name).await,
         Command::Correct {
             session,
+            revision,
             amounts,
             reason,
-        } => correct(repository, clock, update, session, amounts, &reason).await,
-        Command::Void { session, reason } => {
-            void(repository, clock, update, session, &reason).await
+        } => {
+            correct(
+                repository, clock, update, session, revision, amounts, &reason,
+            )
+            .await
         }
+        Command::Void {
+            session,
+            revision,
+            reason,
+        } => void(repository, clock, update, session, revision, &reason).await,
         Command::Step {
             id,
             revision,
@@ -114,6 +123,7 @@ async fn correct(
     clock: &impl Clock,
     update: &AuthorizedUpdate,
     session: SessionId,
+    revision: AuditRevision,
     amounts: Vec<crate::domain::Cents>,
     reason: &str,
 ) -> Result<Change> {
@@ -121,10 +131,11 @@ async fn correct(
         .session_detail(&session, audit_lookup_page()?)
         .await?
         .ok_or(Error::Invalid)?;
+    let target = AuditTarget::at_revision(&detail, revision)?;
     let entries = corrected_entries(detail.entries, amounts)?;
     Ok(Change::Audit(AuditChange::correction(
         update.key.clone(),
-        session,
+        target,
         update.owner,
         AuditReason::new(reason)?,
         clock.now()?,
@@ -155,15 +166,16 @@ async fn void(
     clock: &impl Clock,
     update: &AuthorizedUpdate,
     session: SessionId,
+    revision: AuditRevision,
     reason: &str,
 ) -> Result<Change> {
-    repository
+    let detail = repository
         .session_detail(&session, audit_lookup_page()?)
         .await?
         .ok_or(Error::Invalid)?;
     Ok(Change::Audit(AuditChange::void(
         update.key.clone(),
-        session,
+        AuditTarget::at_revision(&detail, revision)?,
         update.owner,
         AuditReason::new(reason)?,
         clock.now()?,
@@ -272,7 +284,7 @@ fn response(change: &Change, chat: i64) -> Result<Reply> {
             format!(
                 "Audited {} saved for session {}.",
                 change.kind.as_str(),
-                change.session_id.as_str()
+                change.target.session_id().as_str()
             ),
         )),
     }

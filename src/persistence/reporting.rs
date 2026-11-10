@@ -2,7 +2,10 @@ use crate::domain::{
     Cents, CreatedAt, DisplayName, GameId, GuestId, OccurredOn, PlayerId, SessionId,
 };
 
-use super::{AuditKind, AuditReason, OwnerId, PersistenceError, PersistenceResult, ReportTotal};
+use super::{
+    AuditKind, AuditReason, AuditRevision, OwnerId, PersistenceError, PersistenceResult,
+    ReportTotal,
+};
 
 pub const MAX_REPORT_PAGE_SIZE: usize = 50;
 pub const MAX_REPORT_PAGE_NUMBER: u32 = 10_000;
@@ -127,6 +130,7 @@ pub struct SessionDetail {
     pub session: SessionSummary,
     pub entries: Vec<SessionDetailEntry>,
     pub state: AuditedSessionState,
+    pub revision: AuditRevision,
     pub audits: SessionAuditPage,
 }
 

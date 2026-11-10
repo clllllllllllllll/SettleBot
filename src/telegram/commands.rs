@@ -1,6 +1,6 @@
 use super::{auth::AuthorizedUpdate, Error, Result};
 use crate::domain::{Cents, GameId, PlayerId, SessionId};
-use crate::persistence::Revision;
+use crate::persistence::{AuditRevision, Revision};
 
 pub(super) enum Command {
     Start,
@@ -9,11 +9,13 @@ pub(super) enum Command {
     Resume(SessionId),
     Correct {
         session: SessionId,
+        revision: AuditRevision,
         amounts: Vec<Cents>,
         reason: String,
     },
     Void {
         session: SessionId,
+        revision: AuditRevision,
         reason: String,
     },
     Report(ReportCommand),
@@ -92,12 +94,14 @@ fn correction(value: &str) -> Result<Command> {
     let (values, reason) = audit_parts(value)?;
     let mut values = values.split_whitespace();
     let session = SessionId::new(values.next().ok_or(Error::Invalid)?)?;
+    let revision = audit_revision(values.next().ok_or(Error::Invalid)?)?;
     let amounts = values.map(amount).collect::<Result<Vec<_>>>()?;
     if amounts.is_empty() {
         return Err(Error::Invalid);
     }
     Ok(Command::Correct {
         session,
+        revision,
         amounts,
         reason: reason.to_owned(),
     })
@@ -105,10 +109,24 @@ fn correction(value: &str) -> Result<Command> {
 
 fn void(value: &str) -> Result<Command> {
     let (value, reason) = audit_parts(value)?;
+    let mut values = value.split_whitespace();
+    let session = SessionId::new(values.next().ok_or(Error::Invalid)?)?;
+    let revision = audit_revision(values.next().ok_or(Error::Invalid)?)?;
+    if values.next().is_some() {
+        return Err(Error::Invalid);
+    }
     Ok(Command::Void {
-        session: SessionId::new(single_value(value)?)?,
+        session,
+        revision,
         reason: reason.to_owned(),
     })
+}
+
+fn audit_revision(value: &str) -> Result<AuditRevision> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(Error::Invalid);
+    }
+    AuditRevision::new(value.parse().map_err(|_| Error::Invalid)?).map_err(Into::into)
 }
 
 fn audit_parts(value: &str) -> Result<(&str, &str)> {

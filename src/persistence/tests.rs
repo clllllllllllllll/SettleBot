@@ -4,9 +4,22 @@ use crate::domain::{
 };
 
 use super::{
-    DraftState, ExportRequest, OwnerId, PersistenceError, PersistentDraft, ReportPage,
-    ReportPageRequest, Revision, UpdateKey, MAX_REPORT_PAGE_NUMBER, MAX_REPORT_PAGE_SIZE,
+    AuditRevision, DraftState, ExportRequest, OwnerId, PersistenceError, PersistentDraft,
+    ReportPage, ReportPageRequest, Revision, UpdateKey, MAX_REPORT_PAGE_NUMBER,
+    MAX_REPORT_PAGE_SIZE,
 };
+
+#[test]
+fn audit_revisions_match_sqlite_range_and_increment_with_checks() {
+    assert_eq!(AuditRevision::default().value(), 0);
+    assert_eq!(AuditRevision::new(42).unwrap().next().unwrap().value(), 43);
+    let maximum = AuditRevision::new(i64::MAX as u64).unwrap();
+    assert_eq!(maximum.next(), Err(PersistenceError::RevisionOverflow));
+    assert_eq!(
+        AuditRevision::new(u64::MAX),
+        Err(PersistenceError::RevisionOverflow)
+    );
+}
 
 #[test]
 fn export_cursors_are_independent_of_report_page_limits() {

@@ -40,6 +40,8 @@ pub(crate) async fn deliver(
     let reply = match handle(config, secret, body, repository, clock).await {
         Ok(reply) => reply,
         Err(Error::Invalid | Error::Stale) => Reply::text(update.chat, recovery(&update.input)),
+        Err(Error::AuditStale) => Reply::text(update.chat,
+            "That audit revision is stale or the session is voided. Reread /details SESSION_ID before correcting or voiding; voids cannot be restored.".into()),
         Err(Error::Limit) => Reply::text(update.chat, limit_message()),
         Err(Error::ReportCapacity) => Reply::text(update.chat,
             "This report exceeds the supported ledger-history capacity. No partial totals are shown. Contact the operator; /history and /details remain available.".into()),
@@ -62,6 +64,15 @@ fn limit_message() -> String {
 }
 
 fn recovery(input: &str) -> String {
+    let command = input
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .split('@')
+        .next();
+    if matches!(command, Some("/correct" | "/void")) {
+        return "Read /details SESSION_ID for the current revision and participant order. Use /correct SESSION_ID REVISION +5.00 -5.00 | reason or /void SESSION_ID REVISION | reason. Revision 0 means the original; void is terminal.".into();
+    }
     let candidate = input.split(':').next().unwrap_or_default();
     if candidate.starts_with('t') && candidate[1..].bytes().all(|b| b.is_ascii_digit()) {
         return format!("That step is invalid or out of date. Resume with /resume {candidate}.");

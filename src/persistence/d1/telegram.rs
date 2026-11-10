@@ -140,8 +140,13 @@ impl Repository for D1Repository {
                 Text(&reply),
             ],
         )?);
-        self.batch(statements).await?;
-        Ok(())
+        match self.batch(statements).await {
+            Ok(_) => Ok(()),
+            Err(error) => match &transaction.change {
+                Change::Audit(change) => Err(self.audit_failure(change, error).await.into()),
+                _ => Err(error.into()),
+            },
+        }
     }
 }
 

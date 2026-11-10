@@ -10,7 +10,7 @@ pub(crate) struct Event {
 pub(crate) fn event(error: &Error) -> Event {
     let (category, retryable) = match error {
         Error::Unauthorized | Error::Rejected => ("authorization", false),
-        Error::Invalid | Error::Stale | Error::Limit => ("input", false),
+        Error::Invalid | Error::Stale | Error::AuditStale | Error::Limit => ("input", false),
         Error::RateLimited => ("throttled", false),
         Error::ReportCapacity => ("report_capacity", false),
         Error::Timeout => ("telegram_timeout", true),

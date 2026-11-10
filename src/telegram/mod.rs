@@ -34,6 +34,7 @@ pub enum Error {
     Rejected,
     Invalid,
     Stale,
+    AuditStale,
     Limit,
     RateLimited,
     ReportCapacity,
@@ -61,6 +62,7 @@ impl From<PersistenceError> for Error {
             PersistenceError::Storage | PersistenceError::Corrupt(_) => Self::Storage,
             PersistenceError::InvalidPage => Self::Limit,
             PersistenceError::ReportCapacity => Self::ReportCapacity,
+            PersistenceError::AuditConflict => Self::AuditStale,
             _ => Self::Invalid,
         }
     }

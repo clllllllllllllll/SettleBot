@@ -113,10 +113,10 @@ fn text_commands_accept_the_telegram_bot_username_suffix() {
         ("/game@SettleBot Sample Game", "game:Sample Game"),
         ("/resume@SettleBot t1", "resume:t1"),
         (
-            "/correct@SettleBot t1 +1.00 -1.00 | Fix entry",
+            "/correct@SettleBot t1 0 +1.00 -1.00 | Fix entry",
             "correct:t1:2:Fix entry",
         ),
-        ("/void@SettleBot t1 | Duplicate", "void:t1:Duplicate"),
+        ("/void@SettleBot t1 0 | Duplicate", "void:t1:Duplicate"),
         ("/leaderboard@SettleBot 2", "leaderboard:2"),
         ("/gameboard@SettleBot poker 3", "gameboard:poker:3"),
         ("/stats@SettleBot player_one", "stats:player_one:1"),
@@ -165,8 +165,11 @@ fn command_description(command: &Command) -> String {
             session,
             amounts,
             reason,
+            ..
         } => format!("correct:{}:{}:{reason}", session.as_str(), amounts.len()),
-        Command::Void { session, reason } => {
+        Command::Void {
+            session, reason, ..
+        } => {
             format!("void:{}:{reason}", session.as_str())
         }
         Command::Report(super::commands::ReportCommand::Leaderboard { page }) => {
@@ -228,6 +231,7 @@ fn http_errors_are_safe_and_retry_only_storage_or_configuration_failures() {
         (Error::Rejected, 200),
         (Error::Invalid, 200),
         (Error::Stale, 200),
+        (Error::AuditStale, 200),
         (Error::Limit, 200),
         (Error::RateLimited, 200),
         (Error::Timeout, 503),
@@ -580,6 +584,33 @@ fn signed_sgd_parser_preserves_full_integer_boundaries_without_rounding() {
     ] {
         assert_eq!(amount(input), Err(Error::Invalid), "{input}");
     }
+}
+
+#[test]
+fn audit_commands_require_an_explicit_valid_revision() {
+    for text in [
+        "/correct t1 +1.00 -1.00 | reason",
+        "/void t1 | reason",
+        "/void t1 -1 | reason",
+        "/void t1 +1 | reason",
+        "/void t1 9223372036854775808 | reason",
+    ] {
+        let update = decode(&config(), message_with_text(text).to_string().as_bytes()).unwrap();
+        assert!(
+            matches!(parse(&update, "SettleBot"), Err(Error::Invalid)),
+            "{text}"
+        );
+    }
+    let update = decode(
+        &config(),
+        message_with_text("/correct t1 42 +1.00 -1.00 | reason")
+            .to_string()
+            .as_bytes(),
+    )
+    .unwrap();
+    assert!(
+        matches!(parse(&update, "SettleBot"), Ok(Command::Correct { revision, .. }) if revision.value() == 42)
+    );
 }
 
 fn rejected(body: Value) {

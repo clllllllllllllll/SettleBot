@@ -13,6 +13,7 @@ pub enum PersistenceError {
     ReportCapacity,
     InvalidAuditReason,
     InvalidAuditEntries,
+    AuditConflict,
     InvalidExportCursor,
     RevisionOverflow,
     Corrupt(&'static str),

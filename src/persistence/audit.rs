@@ -1,8 +1,68 @@
 use crate::domain::{Cents, CreatedAt, DisplayName, PlayerId, SessionId};
 
-use super::{OwnerId, PersistenceError, PersistenceResult, ReportParticipantIdentity, UpdateKey};
+use super::{
+    AuditedSessionState, OwnerId, PersistenceError, PersistenceResult, ReportParticipantIdentity,
+    SessionDetail, UpdateKey,
+};
 
 pub const MAX_AUDIT_REASON_CHARS: usize = 256;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AuditRevision(u64);
+
+impl AuditRevision {
+    pub fn new(value: u64) -> PersistenceResult<Self> {
+        i64::try_from(value).map_err(|_| PersistenceError::RevisionOverflow)?;
+        Ok(Self(value))
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+
+    pub fn next(self) -> PersistenceResult<Self> {
+        Self::new(
+            self.0
+                .checked_add(1)
+                .ok_or(PersistenceError::RevisionOverflow)?,
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditTarget {
+    session: SessionId,
+    revision: AuditRevision,
+    state: AuditedSessionState,
+}
+
+impl AuditTarget {
+    pub fn at_revision(detail: &SessionDetail, expected: AuditRevision) -> PersistenceResult<Self> {
+        if detail.state == AuditedSessionState::Voided || detail.revision != expected {
+            return Err(PersistenceError::AuditConflict);
+        }
+        expected.next()?;
+        Ok(Self {
+            session: detail.session.session_id.clone(),
+            revision: expected,
+            state: detail.state,
+        })
+    }
+
+    pub fn session_id(&self) -> &SessionId {
+        &self.session
+    }
+    pub fn revision(&self) -> AuditRevision {
+        self.revision
+    }
+    pub(crate) fn prior_kind(&self) -> &'static str {
+        match self.state {
+            AuditedSessionState::Original => "original",
+            AuditedSessionState::Corrected => "correction",
+            AuditedSessionState::Voided => "void",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuditKind {
@@ -65,7 +125,7 @@ impl AuditEntry {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditChange {
     pub key: UpdateKey,
-    pub session_id: SessionId,
+    pub target: AuditTarget,
     pub actor: OwnerId,
     pub kind: AuditKind,
     pub reason: AuditReason,
@@ -76,7 +136,7 @@ pub struct AuditChange {
 impl AuditChange {
     pub fn correction(
         key: UpdateKey,
-        session_id: SessionId,
+        target: AuditTarget,
         actor: OwnerId,
         reason: AuditReason,
         created_at: CreatedAt,
@@ -85,7 +145,7 @@ impl AuditChange {
         validate_entries(&entries)?;
         Ok(Self {
             key,
-            session_id,
+            target,
             actor,
             kind: AuditKind::Correction,
             reason,
@@ -96,14 +156,14 @@ impl AuditChange {
 
     pub fn void(
         key: UpdateKey,
-        session_id: SessionId,
+        target: AuditTarget,
         actor: OwnerId,
         reason: AuditReason,
         created_at: CreatedAt,
     ) -> Self {
         Self {
             key,
-            session_id,
+            target,
             actor,
             kind: AuditKind::Void,
             reason,

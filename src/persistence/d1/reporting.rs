@@ -7,7 +7,7 @@ use crate::domain::{
     Cents, CreatedAt, DisplayName, GameId, GuestId, OccurredOn, PlayerId, SessionId,
 };
 use crate::persistence::{
-    AuditKind, AuditPageRequest, AuditReason, AuditedSessionState, GameLeaderboard,
+    AuditKind, AuditPageRequest, AuditReason, AuditRevision, AuditedSessionState, GameLeaderboard,
     LeaderboardEntry, OwnerId, PersistenceError, PersistenceResult, PlayerReport,
     PlayerSessionSummary, ReportPage, ReportPageRequest, ReportParticipantIdentity, ReportTotal,
     ReportingRepository, SessionAudit, SessionAuditPage, SessionDetail, SessionDetailEntry,
@@ -150,7 +150,7 @@ const SESSION_AUDITS: &str = "
     FROM session_audits WHERE session_id = ?1 AND revision > CAST(?2 AS INTEGER)
     ORDER BY session_audits.revision LIMIT CAST(?3 AS INTEGER)";
 const SESSION_AUDIT_STATE: &str = "
-    SELECT kind FROM session_audits WHERE session_id = ? ORDER BY revision DESC LIMIT 1";
+    SELECT kind, CAST(revision AS TEXT) AS revision FROM session_audits WHERE session_id = ? ORDER BY revision DESC LIMIT 1";
 
 #[derive(Deserialize)]
 struct RosterRow {
@@ -348,6 +348,7 @@ struct AuditRow {
 #[derive(Deserialize)]
 struct AuditStateRow {
     kind: String,
+    revision: String,
 }
 
 impl AuditRow {
@@ -724,11 +725,14 @@ fn decode_session_detail(
     };
     let entries = decode_detail_entries(&mut results, session)?;
     validate_detail(&entries)?;
+    let audits = decode_detail_audits(&mut results, request)?;
+    let (state, revision) = decode_detail_state(&mut results)?;
     Ok(Some(SessionDetail {
         session: header.decode().map_err(corrupt)?,
         entries,
-        audits: decode_detail_audits(&mut results, request)?,
-        state: decode_detail_state(&mut results)?,
+        audits,
+        state,
+        revision,
     }))
 }
 
@@ -755,12 +759,21 @@ fn decode_detail_audits(
 
 fn decode_detail_state(
     results: &mut impl Iterator<Item = D1Result>,
-) -> PersistenceResult<AuditedSessionState> {
-    let kind = next_rows::<AuditStateRow>(results, "session detail state query")?
+) -> PersistenceResult<(AuditedSessionState, AuditRevision)> {
+    let row = next_rows::<AuditStateRow>(results, "session detail state query")?
         .into_iter()
-        .next()
-        .map(|row| row.kind);
-    audit_state(kind.as_deref())
+        .next();
+    let Some(row) = row else {
+        return Ok((AuditedSessionState::Original, AuditRevision::default()));
+    };
+    let revision = row
+        .revision
+        .parse()
+        .map_err(|_| PersistenceError::Corrupt("audit revision"))?;
+    Ok((
+        audit_state(Some(&row.kind))?,
+        AuditRevision::new(revision).map_err(corrupt)?,
+    ))
 }
 
 fn report_game_name(
