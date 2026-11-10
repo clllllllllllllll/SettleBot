@@ -3,6 +3,7 @@
 /dist/
 /.release/
 /backups/
+/agent_docs/
 /node_modules/
 /.pnpm-store/
 /.wrangler/
