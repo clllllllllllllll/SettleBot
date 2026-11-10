@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { deploymentConfig } from "../scripts/prepare-deployment.mjs";
 import { packageRelease, verifyRelease } from "../scripts/release-artifact.mjs";
 import { smoke, smokeOrigin } from "../scripts/smoke.mjs";
-import { requireReviewers } from "../scripts/check-production-gate.mjs";
+import { requireReviewers, verifyProductionGate } from "../scripts/check-production-gate.mjs";
 
 const SHA = "1234567890abcdef1234567890abcdef12345678";
 const values = {
@@ -63,10 +63,83 @@ test("artifact excludes stale Wasm files and rejects wrong commits, corruption, 
 
 test("missing production reviewers fail closed", () => {
   for (const config of [{}, { protection_rules: [] },
+    { protection_rules: null }, { protection_rules: [{ type: "required_reviewers", reviewers: [null, {}] }] },
     { protection_rules: [{ type: "required_reviewers", reviewers: [] }] }]) {
     assert.throws(() => requireReviewers(config));
   }
-  requireReviewers({ protection_rules: [{ type: "required_reviewers", reviewers: [{ id: 1 }] }] });
+  requireReviewers(protection());
+});
+
+function protection(prevent_self_review = false) {
+  return { can_admins_bypass: false,
+    protection_rules: [{ type: "required_reviewers", prevent_self_review,
+      reviewers: [{ type: "User", reviewer: { id: 1 } }] }],
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } };
+}
+const mainOnly = () => ({ total_count: 1, branch_policies: [{ id: 1, name: "main", type: "branch" }] });
+
+function gateResponses() {
+  return { production: protection(), "production/deployment-branch-policies": mainOnly(),
+    staging: { deployment_branch_policy: protection().deployment_branch_policy },
+    "staging/deployment-branch-policies": mainOnly() };
+}
+
+function gateReader(responses, requests = []) {
+  return async (url, init) => {
+    const path = new URL(url).pathname.split("/environments/")[1];
+    requests.push([url, init]);
+    return json(responses[path]);
+  };
+}
+
+test("approval preflight reads actual environment and policy endpoints with bounded GETs", async () => {
+  for (const selfReview of [false, true]) {
+    const data = gateResponses(); data.production = protection(selfReview);
+    const requests = [];
+    await verifyProductionGate("sample/repository", "fake_read_token", gateReader(data, requests));
+    assert.equal(requests.length, 4);
+    assert.ok(requests.every(([, init]) => init.method === "GET" && init.redirect === "error" && init.signal));
+    assert.ok(requests.filter(([url]) => url.includes("deployment-branch-policies")).every(([url]) =>
+      new URL(url).searchParams.get("per_page") === "100"));
+  }
+});
+
+test("approval preflight fails closed on missing, bypassable, broad, protected-only and tag policies", async () => {
+  const invalid = [
+    ["production", {}], ["production", { ...protection(), can_admins_bypass: true }],
+    ["production", { ...protection(), can_admins_bypass: undefined }],
+    ["production", { ...protection(), protection_rules: [] }],
+    ["production", { ...protection(), deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } }],
+    ["production", { ...protection(), deployment_branch_policy: null }],
+    ["staging", {}],
+  ];
+  for (const target of ["production", "staging"]) {
+    for (const policy of [{}, { total_count: 0, branch_policies: [] },
+      { total_count: 2, branch_policies: [mainOnly().branch_policies[0], { name: "release/*", type: "branch" }] },
+      { total_count: 1, branch_policies: [{ name: "*", type: "branch" }] },
+      { total_count: 1, branch_policies: [{ name: "main", type: "tag" }] },
+      { total_count: 1, branch_policies: [{ name: "main" }] },
+      { total_count: 101, branch_policies: mainOnly().branch_policies }]) {
+      invalid.push([`${target}/deployment-branch-policies`, policy]);
+    }
+  }
+  for (const [path, value] of invalid) {
+    const data = gateResponses(); data[path] = value;
+    await assert.rejects(verifyProductionGate("sample/repository", "fake_read_token", gateReader(data)));
+  }
+});
+
+test("approval preflight refuses inaccessible, malformed, timed-out or unavailable API reads", async () => {
+  for (const failure of [async () => json({}, 403), async () => json({}, 404),
+    async () => json({}, 500), async () => new Response("not json"),
+    async () => { throw new TypeError("network unavailable"); },
+    async () => { throw new DOMException("deadline", "TimeoutError"); }]) {
+    await assert.rejects(verifyProductionGate("sample/repository", "fake_read_token", failure));
+  }
+  const data = gateResponses();
+  await assert.rejects(verifyProductionGate("sample/repository", "fake_read_token", async (url, init) =>
+    url.includes("deployment-branch-policies") ? json({}, 403) : gateReader(data)(url, init)));
+  await assert.rejects(verifyProductionGate("sample/repository", "", gateReader(data)));
 });
 
 const options = { origin: "https://settlebot-staging.example.workers.dev", target: "staging",

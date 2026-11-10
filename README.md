@@ -222,6 +222,13 @@ The generic `pnpm deploy` Worker script has been removed. Builds remain dry runs
 requires the reviewed environment-specific release path, whose workflow remains disabled until
 external setup and activation are separately authorized.
 
+The approval preflight uses read-only GitHub API calls to require production reviewers, an
+explicitly disabled administrator bypass, and exactly one `main` branch policy in both environments.
+Missing, inaccessible or ambiguous settings fail closed; protected-branch mode alone cannot prove
+`main`-only deployment. Self-review remains the operator's policy choice. Local injected tests do
+not verify remote approval enforcement. See GitHub's [environment API](https://docs.github.com/en/rest/deployments/environments)
+and [branch-policy API](https://docs.github.com/en/rest/deployments/branch-policies).
+
 `pnpm test:recovery` exercises pinned Wrangler's SQL export and execute commands using synthetic
 data and separate temporary local source/restore directories. It compares schema, migration
 metadata, all ledger/operational records, restored reports, audit lineage, draft resume, and
