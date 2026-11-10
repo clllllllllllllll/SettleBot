@@ -112,6 +112,10 @@ responses remain ambiguous rather than discarding a potentially deliverable noti
 
 ## Implemented reporting
 
+Report totals remain exact signed `i128` cents through aggregation, sorting, and SGD rendering,
+including totals beyond an individual entry's `i64` range. Test RPC totals cross JavaScript as
+decimal strings. Stored entry ranges and valid played-date years (0001–9999) are unchanged.
+
 Authorized administrators can view overall and per-game roster leaderboards, a roster player's dated session results, chronological session history, and full details for one session. Overall and per-game rankings include permanent roster players, including zero-result players, and exclude one-time guests. Player and ordinary session histories also omit guest data; the relevant session's `/details` response is the only report that shows its guest identity and amount.
 
 Report queries use validated pages of 10 rows, cap page sizes at 50 and page numbers at 10,000, and sort with stable identity tie-breakers. Rankings order by total, display name, and player ID; histories order by the exact Asia/Singapore played date and session ID. Exact contribution totals are accumulated in checked widened integers from deterministic 100-row D1 batches. Captured session-row and audit-row boundaries keep each multi-batch report on one logical snapshot while bounding Worker memory; total scan work and latency still grow with matching ledger history. Reporting is read-only and creates no workflow receipt or ledger write. See [Telegram reporting commands](agent_docs/telegram.md#reporting-commands) and [persistence reporting rules](agent_docs/persistence.md#reporting-queries).

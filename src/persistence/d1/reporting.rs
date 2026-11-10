@@ -9,7 +9,7 @@ use crate::domain::{
 use crate::persistence::{
     AuditKind, AuditPageRequest, AuditReason, AuditedSessionState, GameLeaderboard,
     LeaderboardEntry, OwnerId, PersistenceError, PersistenceResult, PlayerReport,
-    PlayerSessionSummary, ReportPage, ReportPageRequest, ReportParticipantIdentity,
+    PlayerSessionSummary, ReportPage, ReportPageRequest, ReportParticipantIdentity, ReportTotal,
     ReportingRepository, SessionAudit, SessionAuditPage, SessionDetail, SessionDetailEntry,
     SessionSummary,
 };
@@ -239,25 +239,6 @@ fn snapshot_value(value: &str) -> PersistenceResult<i64> {
 }
 
 #[derive(Default)]
-struct WideTotal(i128);
-
-impl WideTotal {
-    fn add(&mut self, amount: Cents) -> PersistenceResult<()> {
-        self.0 = self
-            .0
-            .checked_add(i128::from(amount.value()))
-            .ok_or(PersistenceError::Corrupt("report aggregate overflow"))?;
-        Ok(())
-    }
-
-    fn cents(self) -> PersistenceResult<Cents> {
-        i64::try_from(self.0)
-            .map(Cents::new)
-            .map_err(|_| PersistenceError::Corrupt("report aggregate overflow"))
-    }
-}
-
-#[derive(Default)]
 struct ContributionCursor {
     player_id: String,
     session_id: String,
@@ -482,7 +463,7 @@ impl D1Repository {
         &self,
         roster: &[RosterRow],
         snapshot: &ReportSnapshot,
-    ) -> PersistenceResult<BTreeMap<PlayerId, WideTotal>> {
+    ) -> PersistenceResult<BTreeMap<PlayerId, ReportTotal>> {
         let mut totals = empty_totals(roster)?;
         let mut cursor = ContributionCursor::default();
         loop {
@@ -498,7 +479,7 @@ impl D1Repository {
         game: &GameId,
         roster: &[RosterRow],
         snapshot: &ReportSnapshot,
-    ) -> PersistenceResult<BTreeMap<PlayerId, WideTotal>> {
+    ) -> PersistenceResult<BTreeMap<PlayerId, ReportTotal>> {
         let mut totals = empty_totals(roster)?;
         let mut cursor = ContributionCursor::default();
         loop {
@@ -515,15 +496,15 @@ impl D1Repository {
         &self,
         player: &PlayerId,
         snapshot: &ReportSnapshot,
-    ) -> PersistenceResult<Cents> {
-        let mut total = WideTotal::default();
+    ) -> PersistenceResult<ReportTotal> {
+        let mut total = ReportTotal::default();
         let mut cursor = String::new();
         loop {
             let rows = self
                 .player_contribution_batch(player, snapshot, &cursor)
                 .await?;
             if add_amount_batch(&mut total, &mut cursor, rows)? {
-                return total.cents();
+                return Ok(total);
             }
         }
     }
@@ -796,7 +777,7 @@ fn decode_player_report_at_snapshot(
 
 fn leaderboard_page(
     roster: Vec<RosterRow>,
-    totals: BTreeMap<PlayerId, WideTotal>,
+    totals: BTreeMap<PlayerId, ReportTotal>,
     request: ReportPageRequest,
 ) -> PersistenceResult<ReportPage<LeaderboardEntry>> {
     let roster = decode_roster(roster)?;
@@ -813,7 +794,7 @@ fn decode_roster(rows: Vec<RosterRow>) -> PersistenceResult<Vec<(PlayerId, Displ
 
 fn leaderboard_entries(
     roster: Vec<(PlayerId, DisplayName)>,
-    mut totals: BTreeMap<PlayerId, WideTotal>,
+    mut totals: BTreeMap<PlayerId, ReportTotal>,
 ) -> PersistenceResult<Vec<LeaderboardEntry>> {
     roster
         .into_iter()
@@ -823,12 +804,11 @@ fn leaderboard_entries(
 
 fn leaderboard_entry(
     (player_id, player_name): (PlayerId, DisplayName),
-    totals: &mut BTreeMap<PlayerId, WideTotal>,
+    totals: &mut BTreeMap<PlayerId, ReportTotal>,
 ) -> PersistenceResult<LeaderboardEntry> {
     let total = totals
         .remove(&player_id)
-        .ok_or(PersistenceError::Corrupt("report roster total"))?
-        .cents()?;
+        .ok_or(PersistenceError::Corrupt("report roster total"))?;
     Ok(LeaderboardEntry {
         player_id,
         player_name,
@@ -860,14 +840,14 @@ fn paginate<T>(items: Vec<T>, request: ReportPageRequest) -> PersistenceResult<R
     Ok(ReportPage::from_extra(items, request))
 }
 
-fn empty_totals(rows: &[RosterRow]) -> PersistenceResult<BTreeMap<PlayerId, WideTotal>> {
+fn empty_totals(rows: &[RosterRow]) -> PersistenceResult<BTreeMap<PlayerId, ReportTotal>> {
     rows.iter()
-        .map(|row| Ok((PlayerId::new(&row.player_id)?, WideTotal::default())))
+        .map(|row| Ok((PlayerId::new(&row.player_id)?, ReportTotal::default())))
         .collect()
 }
 
 fn add_contribution_batch(
-    totals: &mut BTreeMap<PlayerId, WideTotal>,
+    totals: &mut BTreeMap<PlayerId, ReportTotal>,
     cursor: &mut ContributionCursor,
     rows: Vec<ContributionRow>,
 ) -> PersistenceResult<bool> {
@@ -885,7 +865,7 @@ fn add_contribution_batch(
 }
 
 fn add_amount_batch(
-    total: &mut WideTotal,
+    total: &mut ReportTotal,
     cursor: &mut String,
     rows: Vec<AmountRow>,
 ) -> PersistenceResult<bool> {

@@ -4,6 +4,7 @@ mod audit;
 pub mod d1;
 mod error;
 mod export;
+mod report_total;
 mod reporting;
 mod repositories;
 mod types;
@@ -17,6 +18,7 @@ pub use export::{
     ExportCursor, ExportRepository, ExportRequest, EXPORT_FORMAT, MAX_EXPORT_AUDITS_PER_CHUNK,
     MAX_EXPORT_CATALOGS_PER_CHUNK,
 };
+pub use report_total::ReportTotal;
 pub use reporting::{
     AuditPageRequest, AuditedSessionState, GameLeaderboard, LeaderboardEntry, PlayerReport,
     PlayerSessionSummary, ReportPage, ReportPageRequest, ReportParticipantIdentity,

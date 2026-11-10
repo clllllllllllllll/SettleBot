@@ -2,7 +2,7 @@ use crate::domain::{
     Cents, CreatedAt, DisplayName, GameId, GuestId, OccurredOn, PlayerId, SessionId,
 };
 
-use super::{AuditKind, AuditReason, OwnerId, PersistenceError, PersistenceResult};
+use super::{AuditKind, AuditReason, OwnerId, PersistenceError, PersistenceResult, ReportTotal};
 
 pub const MAX_REPORT_PAGE_SIZE: usize = 50;
 pub const MAX_REPORT_PAGE_NUMBER: u32 = 10_000;
@@ -79,7 +79,7 @@ impl<T> ReportPage<T> {
 pub struct LeaderboardEntry {
     pub player_id: PlayerId,
     pub player_name: DisplayName,
-    pub total: Cents,
+    pub total: ReportTotal,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,7 +105,7 @@ pub struct PlayerSessionSummary {
 pub struct PlayerReport {
     pub player_id: PlayerId,
     pub player_name: DisplayName,
-    pub total: Cents,
+    pub total: ReportTotal,
     pub sessions: ReportPage<PlayerSessionSummary>,
 }
 

@@ -245,3 +245,42 @@ test("authorized Telegram reports show exact dates and confine guest details", a
   assert.equal((await telegram("/details session_one", 999)).error, "Rejected");
   assert.equal((await telegram("/leaderboard 10001")).error, "Limit");
 });
+
+test("widened positive and negative report totals survive ordering, RPCs and Telegram rendering", async () => {
+  for (const id of ["wide_positive", "wide_negative"]) {
+    await commandSuccess({ operation: "add_player", id, name: id });
+  }
+  for (const [suffix, amount] of [["large", "9223372036854775807"], ["extra", "2"]]) {
+    await saveAndConfirm(`wide_${suffix}`, "poker", "0001-01-01", [
+      { kind: "roster", id: "wide_positive", amount },
+      { kind: "roster", id: "wide_negative", amount: (-BigInt(amount)).toString() },
+    ]);
+  }
+  const total = "9223372036854775809";
+  const overall = await commandSuccess({ operation: "leaderboard", game: null, page: 1, size: 50 });
+  const poker = await commandSuccess({ operation: "leaderboard", game: "poker", page: 1, size: 50 });
+  for (const entries of [overall.items, poker.page.items]) {
+    assert.equal(entries[0].id, "wide_positive");
+    assert.equal(entries[0].total, total);
+    assert.equal(entries.at(-1).id, "wide_negative");
+    assert.equal(entries.at(-1).total, `-${total}`);
+  }
+  for (const [id, prefix] of [["wide_positive", ""], ["wide_negative", "-"]]) {
+    const report = await commandSuccess({ operation: "player_report", player: id, page: 1, size: 10 });
+    assert.equal(report.total, `${prefix}${total}`);
+    const reply = await telegramSuccess(`/stats ${id}`);
+    assert.ok(reply.text.includes(`Overall: ${prefix}S$92233720368547758.09`));
+  }
+  for (const command of ["/leaderboard", "/gameboard poker"]) {
+    const reply = await telegramSuccess(command);
+    assert.match(reply.text, /wide_positive.*S\$92233720368547758\.09/);
+    assert.match(reply.text, /wide_negative.*-S\$92233720368547758\.09/);
+  }
+  await saveAndConfirm("wide_cancel", "poker", "9999-12-31", [
+    { kind: "roster", id: "wide_positive", amount: "-9223372036854775807" },
+    { kind: "roster", id: "wide_negative", amount: "9223372036854775807" },
+  ]);
+  for (const [player, expected] of [["wide_positive", "2"], ["wide_negative", "-2"]]) {
+    assert.equal((await commandSuccess({ operation: "player_report", player, page: 1, size: 10 })).total, expected);
+  }
+});
