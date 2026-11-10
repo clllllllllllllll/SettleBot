@@ -46,7 +46,7 @@ The ledger is intentionally small in scope so the project can focus on the compl
 
 - Structured logs and application health checks
 - Idempotent webhook processing and transactional writes
-- Scheduled backups and portable data exports
+- Portable data exports; scheduled backup automation remains outstanding Phase 7 operations work
 - Deployment, rollback, and recovery runbooks
 - Documented cost limits and migration options
 
@@ -83,6 +83,11 @@ The [persistence module](src/persistence/mod.rs) provides injected repository co
 Drafts retain their numeric owner, selected game and date, ordered roster/guest participants, partial integer-cent amounts, revision, and open/consumed state. Confirmation validates the complete zero-sum session and commits its entries, draft consumption, and idempotent result in one D1 batch. Replaying the same update returns its original result; a different update against a consumed draft is rejected. The [persistence notes](agent_docs/persistence.md) describe the transaction and local test boundary.
 
 The authorized Telegram webhook now uses this foundation. Incomplete guided selections live in durable workflow records; confirmation creates and consumes the validated ledger draft in the same atomic batch as the session and both replay records.
+
+Telegram confirmation has distinct orchestration in the [service](src/telegram/service.rs) and
+[D1 workflow adapter](src/persistence/d1/telegram.rs), sharing the production
+[Phase 2 confirmation SQL](src/persistence/d1/confirmation.rs). Both direct persistence and
+Telegram tests provide relevant transaction and replay coverage.
 
 ## Implemented Telegram workflow
 
@@ -133,7 +138,7 @@ Snapshot test hooks are compiled only with the `d1-test` feature.
 
 Authorized administrators can view overall and per-game roster leaderboards, a roster player's dated session results, chronological session history, and full details for one session. Overall and per-game rankings include permanent roster players, including zero-result players, and exclude one-time guests. Player and ordinary session histories also omit guest data; the relevant session's `/details` response is the only report that shows its guest identity and amount.
 
-Report queries use validated pages of 10 rows, cap page sizes at 50 and page numbers at 10,000, and sort with stable identity tie-breakers. Rankings order by total, display name, and player ID; histories order by the exact Asia/Singapore played date and session ID. Exact contribution totals are accumulated in checked widened integers from deterministic 100-row D1 batches. Captured session-row and audit-row boundaries keep each multi-batch report on one logical snapshot while bounding Worker memory; total scan work and latency still grow with matching ledger history. Reporting is read-only and creates no workflow receipt or ledger write. See [Telegram reporting commands](agent_docs/telegram.md#reporting-commands) and [persistence reporting rules](agent_docs/persistence.md#reporting-queries).
+Report queries use validated pages of 10 rows, cap page sizes at 50 and page numbers at 10,000, and sort with stable identity tie-breakers. Rankings order by total, display name, and player ID; histories order by the exact Asia/Singapore played date and session ID. Captured session-row and audit-row boundaries keep each multi-batch report on one logical snapshot. Contribution batches and query calls are bounded as described above; SQL read cost still depends on ledger history and roster-map memory depends on the historical roster. Reporting creates no workflow receipt or ledger write. See [Telegram reporting commands](agent_docs/telegram.md#reporting-commands) and [persistence reporting rules](agent_docs/persistence.md#reporting-queries).
 
 ## Implemented audit and recovery
 
@@ -169,7 +174,7 @@ flowchart LR
     TG[Telegram Group] -->|HTTPS webhook| PROD
     STG --> D1S[(Staging D1)]
     PROD --> D1P[(Production D1)]
-    CRON[Scheduled backup] --> D1P
+    CRON[Scheduled backup - planned] --> D1P
 ```
 
 The planned delivery flow keeps pull requests deployment-free, deploys successful `main` builds to an isolated staging environment, and requires staging smoke tests plus manual approval before production promotion. Production will use a stable Worker URL for the Telegram webhook, so routine releases update the Worker behind that endpoint rather than reconfiguring the bot.
@@ -218,7 +223,7 @@ pnpm build
 
 The current Worker exposes `GET /health` as a minimal platform smoke check. Native [request tests](src/tests.rs) verify HTTP 200, JSON content type, the exact `{"status":"ok"}` body, and 404s for unknown paths and unsupported health methods. Health responses use `no-store`; deployments configured with `RELEASE_SHA` also identify the commit in `X-SettleBot-Commit`. `pnpm build` compiles the release Worker and performs a deployment dry run.
 
-`pnpm test:d1` builds feature-gated Rust test modules and runs 37 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all five migrations, and checks persistence, Telegram authorization, guided flows, multi-batch reporting, correction/void lineage, audit rollback and snapshot consistency, portable export and isolated restore, rejected and oversized requests, throttling, concurrency, rollback, timeout/delivery replay, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The small JavaScript bridge exists only in the test harness; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so only the test configuration uses that date; the production configuration retains `2026-10-14`.
+`pnpm test:d1` builds feature-gated Rust test modules and runs 48 integration cases against Wrangler's actual local D1/workerd runtime. It starts from empty ephemeral databases, applies all five migrations, and checks persistence, Telegram authorization and ingress, guided flows, widened reporting and capacity, snapshot boundaries, revision-bound audits and restore ordering, portable JSON reconstruction, concurrency, rollback, delivery classification, receipt replay across syntax upgrades, and full `i64` cent precision. Outbound Telegram sends use an injected test transport. The JavaScript bridges exist only in local test tooling; the production backend stays Rust. The pinned workerd supports dates through `2026-10-13`, so isolated tests use that override; production retains `2026-10-14`.
 
 For local configuration, copy [.dev.vars.example](.dev.vars.example) to the ignored `.dev.vars` file and supply environment-specific values. The example is fake and cannot contact a real bot. Production and staging bindings, secrets, webhook configuration, and deployments remain separately authorized work.
 
@@ -257,6 +262,32 @@ test remains ledger-only and is not a supported operator importer. Remote recove
 - Credentials and authorization configuration read from Worker secret bindings
 
 Phase 6 passed local and remote CI validation; remote backup, restore, and live Telegram evidence do not exist. Phase 7 has prepared artifact promotion, environment configuration, read-only smoke checks, and an [operations runbook](agent_docs/deployment.md), with release execution disabled. Secret provisioning, remote environments, deployment/smoke evidence, approval configuration, alerting, and rollback verification remain outstanding. The repository is not production-ready or deployed.
+
+## Review remediation evidence
+
+Local remediation on `codex/review-remediation` was validated on 2026-11-10 with Rust 1.99.0,
+Node.js 24.22.1, pnpm 11.25.0 and locked Wrangler 4.150.0:
+
+- Rustfmt, Clippy with warnings denied, 76 native tests and 48 local D1/workerd tests passed.
+- `pnpm test:recovery` verified actual local SQL export/restore across 13 application/migration tables.
+- All 11 delivery tests, Actionlint 1.7.12, the production build, generated staging/production
+  dry runs with fake IDs, and both freshly packaged Worker smoke tests passed.
+- Normal JavaScript and Wasm exclude both test RPC exports. Fresh packages use the actual tested
+  checkout SHA; local manifest hashes prove integrity, not an independent source attestation.
+
+Historical CI passed for reporting batching commit `5e6f33d` in
+[run 41485597899](https://github.com/clllllllllllllll/SettleBot/actions/runs/41485597899) and disabled
+Phase 7 preparation commit `4ae7d6a` in
+[run 42463293409](https://github.com/clllllllllllllll/SettleBot/actions/runs/42463293409), as verified
+during the 2026-11-10 review. These runs predate and do not validate the new remediation commits.
+The branch remains local and unmerged, with no new remote CI, deployment, live Telegram,
+remote recovery, monitoring or GitHub approval-enforcement evidence.
+
+Before release activation, the owner must choose the old-run/queued-commit staging policy.
+An independent artifact digest remains optional hardening. Practical amount caps, narrower dates,
+restoration commands and a new aggregation architecture remain deferred product decisions.
+Operational-table retention, webhook-secret strength, Unicode message length and live BotApi
+interoperability remain follow-up items. Scheduled backup automation is still unimplemented.
 
 ## Planned environments
 

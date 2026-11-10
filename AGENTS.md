@@ -53,6 +53,7 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 pnpm test:d1
+pnpm test:recovery
 pnpm test:delivery
 pnpm build
 ```
