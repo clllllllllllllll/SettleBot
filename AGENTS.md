@@ -36,6 +36,8 @@ Read [the implementation plan](agent_docs/implementation-plan.md) before impleme
 - **Phase 6 — Audit and recovery (complete):** Audited corrections and voids, private JSON export, isolated local recovery verification, and operational documentation. Implementation commit `7c91f1f` passed Actions run `42460091640`.
 - **Phase 7 — Delivery and operations (in preparation):** Disabled release workflows and private environment configuration are prepared locally. Activation, external setup, deployment, smoke evidence, approval enforcement, monitoring, and rollback exercises remain outstanding.
 
+As verified on 2026-11-16, local and GitHub `main` are at remediation commit `fd72da3cd10f0779298a7768e51fcb1797360121`, which passed [CI run 42753192043](https://github.com/clllllllllllllll/SettleBot/actions/runs/42753192043) on 2026-11-10. Validation includes local SQL recovery and packaged-Worker smoke; release was skipped. GitHub has no environments or deployments, and `main` is unprotected. See the [current status](agent_docs/implementation-plan.md#current-status) for evidence and remaining gates.
+
 Remote CI above means only that GitHub-hosted validation passed. It is not evidence of a deployed Worker, remote migration, staging environment, production readiness, or live Telegram behavior.
 
 ## Build, test, and development commands

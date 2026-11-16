@@ -8,7 +8,7 @@ A production-minded serverless application built to demonstrate cloud architectu
 >
 > **Target cost:** S$0/month within Cloudflare's free tier
 
-The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. Phases 0–6 are on `main`; Phase 6 commit `7c91f1f` passed [CI run 42460091640](https://github.com/clllllllllllllll/SettleBot/actions/runs/42460091640). Phase 7 configuration and workflows are in preparation, with deployment disabled in source. The Telegram workflow has not been exercised against live Telegram or remote D1. CI validates pull requests and `main`; it does not currently deploy.
+The [implementation plan](agent_docs/implementation-plan.md) defines ordered completion gates and records verification evidence. As verified on 2026-11-16, local and GitHub `main` are at review-remediation commit `fd72da3`, which passed [CI run 42753192043](https://github.com/clllllllllllllll/SettleBot/actions/runs/42753192043) on 2026-11-10. Phases 0–6 are complete; Phase 7 configuration and workflows are in preparation, with deployment disabled in source and the release job skipped in that run. The Telegram workflow has not been exercised against live Telegram or remote D1. CI validates pull requests and `main`; it does not currently deploy.
 
 ## Overview
 
@@ -280,8 +280,13 @@ Historical CI passed for reporting batching commit `5e6f33d` in
 Phase 7 preparation commit `4ae7d6a` in
 [run 42463293409](https://github.com/clllllllllllllll/SettleBot/actions/runs/42463293409), as verified
 during the 2026-11-10 review. These runs predate and do not validate the new remediation commits.
-The branch remains local and unmerged, with no new remote CI, deployment, live Telegram,
-remote recovery, monitoring or GitHub approval-enforcement evidence.
+The complete remediation is now on local and GitHub `main` at
+`fd72da3cd10f0779298a7768e51fcb1797360121`. Verified on 2026-11-16,
+[CI run 42753192043](https://github.com/clllllllllllllll/SettleBot/actions/runs/42753192043)
+passed on 2026-11-10, including formatting, Clippy, native and delivery tests, local D1 tests,
+SQL recovery, build, packaging, packaged-Worker smoke and artifact retention. Release was skipped.
+GitHub reports no open pull requests, no environments or deployments, and `main` is unprotected.
+Deployment, live Telegram, remote recovery, monitoring and approval enforcement remain unverified.
 
 Before release activation, the owner must choose the old-run/queued-commit staging policy.
 An independent artifact digest remains optional hardening. Practical amount caps, narrower dates,
